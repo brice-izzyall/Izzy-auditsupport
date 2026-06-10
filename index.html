@@ -12,9 +12,102 @@
     html,body{margin:0;padding:0;min-height:100%;}
     body{background:#F4F8FB;}
     button{font-family:inherit;}
+
+    /* Le footer d'impression reste caché à l'écran */
+    .print-footer{display:none;}
+
+    @page{
+      size:A4;
+      margin:14mm 12mm 22mm 12mm;
+    }
+
     @media print{
-      .no-print{display:none!important;}
-      body{background:white;}
+      /* Forcer les couleurs et fonds à s'imprimer */
+      *,*::before,*::after{
+        -webkit-print-color-adjust:exact !important;
+        print-color-adjust:exact !important;
+        color-adjust:exact !important;
+      }
+
+      html,body{
+        background:white !important;
+        font-size:10pt;
+      }
+
+      .no-print{display:none !important;}
+
+      /* Cacher les logos d'arrière-plan en filigrane qui débordent en PDF */
+      .bg-logo{display:none !important;}
+
+      /* Stack les grilles trop denses pour l'A4 */
+      .hero-grid{grid-template-columns:1fr !important; gap:24px !important;}
+      .stat-grid-4{grid-template-columns:repeat(2,1fr) !important; gap:10px !important;}
+      .stat-grid-3{grid-template-columns:repeat(3,1fr) !important; gap:10px !important;}
+
+      /* Réduire les paddings des sections sombres pour ne pas exploser sur le PDF */
+      .dark-section, .gradient-section{
+        padding:32px 28px !important;
+      }
+      .dark-section h3, .gradient-section h3{font-size:22pt !important;}
+
+      /* Éviter les coupures à l'intérieur des blocs cohérents */
+      .keep-together{
+        page-break-inside:avoid;
+        break-inside:avoid;
+      }
+
+      /* Forcer un saut de page avant certaines sections */
+      .page-break-before{
+        page-break-before:always;
+        break-before:page;
+      }
+
+      /* Titres : pas de coupure juste après */
+      h1, h2, h3, h4{
+        page-break-after:avoid;
+        break-after:avoid;
+      }
+
+      /* Footer présent sur chaque page imprimée */
+      .print-footer{
+        display:flex !important;
+        position:fixed;
+        bottom:-15mm;
+        left:0;
+        right:0;
+        height:12mm;
+        align-items:center;
+        justify-content:space-between;
+        padding:0 14mm;
+        font-family:"Wix Madefor Text",sans-serif;
+        font-size:8pt;
+        color:#5F7388;
+        border-top:1px solid #CDD9E3;
+      }
+      .print-footer img{
+        height:18px;
+        width:auto;
+      }
+      .print-footer-brand{
+        display:flex;
+        align-items:center;
+        gap:8px;
+        font-weight:600;
+      }
+
+      /* CTA Calendly : préserver l'impression du fond sombre */
+      .cta-calendly{
+        background:#0A1F33 !important;
+        color:#fff !important;
+        page-break-inside:avoid;
+      }
+      .cta-calendly *{color:#fff !important;}
+      .cta-calendly .calendly-btn{
+        background:#A8DCEC !important;
+        color:#0A1F33 !important;
+        border:none !important;
+      }
+      .cta-calendly .calendly-url{color:#A8DCEC !important;}
     }
   </style>
 </head>
@@ -589,7 +682,7 @@
 
       return <W stage={stage} step={step} totalSteps={STEPS.length}>
         <section style={{paddingTop:56}}>
-          <div style={{display:'grid', gridTemplateColumns:'1.4fr 1fr', gap:56, alignItems:'start', marginBottom:60}}>
+          <div className="hero-grid keep-together" style={{display:'grid', gridTemplateColumns:'1.4fr 1fr', gap:56, alignItems:'start', marginBottom:60}}>
             <div>
               <div style={{fontFamily:F.s, fontSize:11, fontWeight:700, color:c.accent, letterSpacing:'0.2em', textTransform:'uppercase', marginBottom:14}}>
                 Rapport — {lead.company||'Votre organisation'}
@@ -621,7 +714,7 @@
           </div>
 
           <Rule label="Synthèse exécutive" num="01"/>
-          <div style={{display:'grid', gridTemplateColumns:'repeat(4, 1fr)', gap:16}}>
+          <div className="stat-grid-4 keep-together" style={{display:'grid', gridTemplateColumns:'repeat(4, 1fr)', gap:16}}>
             <Card label="Coût réel mensuel" value={`${Math.round(res.totalR/1000)}k€`} sub={`dont ${Math.round(res.totalH/res.totalR*100)}% de coûts cachés`} accent={c.coral} icon={DollarSign}/>
             <Card label="Coût par ticket" value={`${fmt(res.cpt)}€`} sub={res.cpt>25?'Au-dessus du benchmark':'Dans la norme sectorielle'} accent={res.cpt>25?c.coral:c.accent} icon={Hash}/>
             <Card label="Risque de churn" value={`${res.churn.toFixed(1)}%`} sub={`${res.atRisk} clients exposés`} accent={res.churn>15?c.coral:res.churn>7?c.amber:c.accent} icon={AlertTriangle}/>
@@ -633,7 +726,7 @@
           </div>
 
           <Rule label="Cartographie de la maturité" num="02"/>
-          <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:24}}>
+          <div className="keep-together" style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:24}}>
             <div style={{border:`1px solid ${c.rule}`, borderRadius:10, padding:28, background:c.cream}}>
               <div style={{fontFamily:F.d, fontSize:20, fontWeight:700, marginBottom:4}}>Votre position vs benchmark</div>
               <ResponsiveContainer width="100%" height={280}>
@@ -678,8 +771,8 @@
           </div>
 
           <Rule label="Coûts cachés et inefficacités" num="03"/>
-          <div style={{background:c.ink, color:'#fff', padding:'44px 48px', borderRadius:10, position:'relative', overflow:'hidden'}}>
-            <div style={{position:'absolute', top:-60, right:-30, opacity:0.05}}><img src={IZZY_LOGO} alt="" style={{width:400}}/></div>
+          <div className="dark-section keep-together" style={{background:c.ink, color:'#fff', padding:'44px 48px', borderRadius:10, position:'relative', overflow:'hidden'}}>
+            <div className="bg-logo" style={{position:'absolute', top:-60, right:-30, opacity:0.05}}><img src={IZZY_LOGO} alt="" style={{width:400}}/></div>
             <div style={{position:'relative'}}>
               <div style={{fontFamily:F.s, fontSize:10, fontWeight:700, letterSpacing:'0.2em', color:c.cyan, textTransform:'uppercase'}}>L'iceberg du support</div>
               <div style={{fontFamily:F.d, fontSize:30, fontWeight:700, marginTop:12, maxWidth:700}}>
@@ -710,12 +803,12 @@
           </div>
 
           <Rule label="Impact satisfaction client" num="04"/>
-          <div style={{display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:16}}>
+          <div className="stat-grid-3 keep-together" style={{display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:16}}>
             <Card label="NPS actuel" value={res.normalized.nps} icon={Heart} sub={res.normalized.nps<30?'Zone de vigilance':res.normalized.nps<50?'Acceptable':'Bon'} accent={res.normalized.nps<30?c.coral:c.accent}/>
             <Card label="CSAT" value={`${res.normalized.csat}%`} icon={Activity} sub={`${res.normalized.csat<75?'En dessous':'Au-dessus'} de la médiane B2B (75%)`} accent={res.normalized.csat<75?c.amber:c.accent}/>
             <Card label="Ratio réclamations" value={`${res.cmpRatio.toFixed(1)}%`} icon={AlertCircle} sub={`${res.normalized.complaints} sur ${res.normalized.tickets} tickets`} accent={res.cmpRatio>3?c.coral:c.accent}/>
           </div>
-          <div style={{marginTop:20, padding:'28px 36px', background:c.cream, border:`1px solid ${c.rule}`, borderLeft:`4px solid ${c.coral}`, borderRadius:8}}>
+          <div className="keep-together" style={{marginTop:20, padding:'28px 36px', background:c.cream, border:`1px solid ${c.rule}`, borderLeft:`4px solid ${c.coral}`, borderRadius:8}}>
             <div style={{display:'flex', alignItems:'flex-start', gap:16}}>
               <ShieldAlert size={26} color={c.coral} sw={1.5} style={{flexShrink:0, marginTop:2}}/>
               <div>
@@ -728,7 +821,7 @@
           </div>
 
           <Rule label="Diagnostic" num="05"/>
-          <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:32}}>
+          <div className="keep-together" style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:32}}>
             <div>
               <div style={{display:'flex', alignItems:'center', gap:10, marginBottom:16}}>
                 <CheckCircle2 size={20} color={c.accent} sw={1.5}/>
@@ -761,7 +854,7 @@
           <Rule label="Plan d'action priorisé" num="06"/>
           <div style={{display:'grid', gap:12}}>
             {diag.rec.map((r,i) => (
-              <div key={i} style={{display:'grid', gridTemplateColumns:'56px 1fr 200px', gap:20, padding:'22px 24px', background:c.cream, border:`1px solid ${c.rule}`, borderRadius:8, alignItems:'center'}}>
+              <div key={i} className="keep-together" style={{display:'grid', gridTemplateColumns:'56px 1fr 200px', gap:20, padding:'22px 24px', background:c.cream, border:`1px solid ${c.rule}`, borderRadius:8, alignItems:'center'}}>
                 <div style={{fontFamily:F.d, fontSize:40, fontWeight:800, color:r.p===1?c.coral:r.p===2?c.amber:c.accent, lineHeight:1, letterSpacing:'-0.03em'}}>{String(i+1).padStart(2,'0')}</div>
                 <div>
                   <span style={{fontFamily:F.s, fontSize:9, fontWeight:700, padding:'2px 10px', borderRadius:100, background:r.p===1?c.coral:r.p===2?c.amber:c.accent, color:'#fff', letterSpacing:'0.1em', textTransform:'uppercase', marginBottom:8, display:'inline-block'}}>Priorité {r.p}</span>
@@ -777,8 +870,8 @@
           </div>
 
           <Rule label="Simulation d'externalisation" num="07"/>
-          <div style={{background:`linear-gradient(135deg, ${c.ink} 0%, ${c.navy} 100%)`, color:'#fff', padding:'52px', borderRadius:10, position:'relative', overflow:'hidden'}}>
-            <div style={{position:'absolute', bottom:-60, right:-40, opacity:0.06}}><img src={IZZY_LOGO} alt="" style={{width:380}}/></div>
+          <div className="gradient-section keep-together" style={{background:`linear-gradient(135deg, ${c.ink} 0%, ${c.navy} 100%)`, color:'#fff', padding:'52px', borderRadius:10, position:'relative', overflow:'hidden'}}>
+            <div className="bg-logo" style={{position:'absolute', bottom:-60, right:-40, opacity:0.06}}><img src={IZZY_LOGO} alt="" style={{width:380}}/></div>
             <div style={{position:'relative'}}>
               <div style={{fontFamily:F.s, fontSize:10, fontWeight:700, letterSpacing:'0.2em', opacity:0.8, textTransform:'uppercase'}}>Et si votre support était externalisé ?</div>
               <h3 style={{fontFamily:F.d, fontSize:36, fontWeight:800, margin:'12px 0 18px', letterSpacing:'-0.02em', lineHeight:1.1}}>Le potentiel d'un partenaire spécialisé, <span style={{fontStyle:'italic', color:c.cyan}}>chiffré sur vos données.</span></h3>
@@ -800,7 +893,7 @@
           </div>
 
           <Rule label="Rapport de direction" num="08"/>
-          <div style={{background:c.cream, border:`1px solid ${c.rule}`, borderRadius:10, padding:'44px 48px'}}>
+          <div className="keep-together" style={{background:c.cream, border:`1px solid ${c.rule}`, borderRadius:10, padding:'44px 48px'}}>
             <div style={{fontFamily:F.s, fontSize:10, fontWeight:700, color:c.muted, letterSpacing:'0.2em', textTransform:'uppercase', marginBottom:8}}>Note confidentielle · Direction Générale</div>
             <div style={{fontFamily:F.d, fontSize:28, fontWeight:700, letterSpacing:'-0.02em', marginBottom:32}}>Synthèse stratégique — {lead.company||'Votre organisation'}</div>
             {[
@@ -820,15 +913,51 @@
             </div>
           </div>
 
-          <div style={{marginTop:56, padding:'52px', background:c.ink, color:'#fff', borderRadius:10, textAlign:'center'}}>
-            <div style={{fontFamily:F.s, fontSize:10, fontWeight:700, letterSpacing:'0.25em', opacity:0.6, textTransform:'uppercase'}}>Vous voulez aller plus loin ?</div>
+          <div className="cta-calendly keep-together" style={{marginTop:56, padding:'52px', background:c.ink, color:'#fff', borderRadius:10, textAlign:'center'}}>
+            <div style={{fontFamily:F.s, fontSize:10, fontWeight:700, letterSpacing:'0.25em', opacity:0.6, textTransform:'uppercase'}}>Prochaine étape</div>
             <h3 style={{fontFamily:F.d, fontSize:36, fontWeight:800, margin:'14px 0 20px', letterSpacing:'-0.02em', lineHeight:1.1}}>
               Échangeons sur votre <span style={{fontStyle:'italic', color:c.cyan}}>plan de transformation</span>
             </h3>
-            <p style={{fontFamily:F.s, fontSize:15, lineHeight:1.55, opacity:0.8, maxWidth:540, margin:'0 auto 28px'}}>
-              Un consultant Izzy All reviendra vers vous sous 48h pour présenter le rapport et les leviers d'action prioritaires.
+            <p style={{fontFamily:F.s, fontSize:15, lineHeight:1.55, opacity:0.85, maxWidth:560, margin:'0 auto 28px'}}>
+              Réservez 30 minutes avec un consultant Izzy All pour challenger ces conclusions et construire un plan d'action sur-mesure pour {lead.company||'votre organisation'}.
             </p>
-            <Btn onClick={()=>window.print()} style={{margin:'0 auto'}}><Download size={16}/> Télécharger le rapport PDF</Btn>
+            <a href="https://calendly.com/commercial-izzysales/30min" target="_blank" rel="noopener noreferrer"
+              className="calendly-btn"
+              style={{
+                display:'inline-flex', alignItems:'center', gap:10,
+                padding:'16px 32px',
+                background:c.cyan, color:c.ink,
+                border:'none', borderRadius:100,
+                fontFamily:F.s, fontSize:14, fontWeight:700,
+                letterSpacing:'0.06em', textTransform:'uppercase',
+                textDecoration:'none',
+                transition:'all 0.2s',
+              }}
+              onMouseEnter={e=>e.currentTarget.style.background='#BAE4F0'}
+              onMouseLeave={e=>e.currentTarget.style.background=c.cyan}
+            >
+              <Clock size={16}/> Réserver mon créneau (30 min)
+            </a>
+            <div className="calendly-url" style={{marginTop:18, fontFamily:F.s, fontSize:12, opacity:0.7, letterSpacing:'0.04em'}}>
+              calendly.com/commercial-izzysales/30min
+            </div>
+            <div className="no-print" style={{marginTop:24, paddingTop:24, borderTop:'1px solid rgba(255,255,255,0.12)'}}>
+              <button onClick={()=>window.print()}
+                style={{background:'transparent', color:'#fff', border:`1px solid rgba(255,255,255,0.25)`, borderRadius:100, padding:'10px 20px', fontFamily:F.s, fontSize:12, fontWeight:500, cursor:'pointer', display:'inline-flex', alignItems:'center', gap:8}}>
+                <Download size={14}/> Télécharger ce rapport en PDF
+              </button>
+            </div>
+          </div>
+
+          {/* Footer répété sur chaque page imprimée */}
+          <div className="print-footer">
+            <div className="print-footer-brand">
+              <img src={IZZY_LOGO} alt="Izzy All"/>
+              <span>Izzy All — Audit Support Client</span>
+            </div>
+            <div>
+              Réservez votre échange : calendly.com/commercial-izzysales/30min
+            </div>
           </div>
         </section>
       </W>;
