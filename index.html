@@ -18,7 +18,7 @@
 
     @page{
       size:A4;
-      margin:14mm 12mm 22mm 12mm;
+      margin:14mm 12mm 16mm 12mm;
     }
 
     @media print{
@@ -56,36 +56,30 @@
         break-inside:avoid;
       }
 
-      /* Forcer un saut de page avant certaines sections */
-      .page-break-before{
-        page-break-before:always;
-        break-before:page;
-      }
-
       /* Titres : pas de coupure juste après */
       h1, h2, h3, h4{
         page-break-after:avoid;
         break-after:avoid;
       }
 
-      /* Footer présent sur chaque page imprimée */
+      /* Footer répété sur chaque page imprimée — positionné dans la marge basse */
       .print-footer{
         display:flex !important;
         position:fixed;
-        bottom:-15mm;
-        left:0;
-        right:0;
-        height:12mm;
+        bottom:2mm;
+        left:12mm;
+        right:12mm;
+        height:10mm;
         align-items:center;
         justify-content:space-between;
-        padding:0 14mm;
         font-family:"Wix Madefor Text",sans-serif;
         font-size:8pt;
         color:#5F7388;
+        padding-top:3mm;
         border-top:1px solid #CDD9E3;
       }
       .print-footer img{
-        height:18px;
+        height:16px;
         width:auto;
       }
       .print-footer-brand{
@@ -93,6 +87,11 @@
         align-items:center;
         gap:8px;
         font-weight:600;
+      }
+      .print-footer a{
+        color:#2D7A8B !important;
+        font-weight:600;
+        text-decoration:none;
       }
 
       /* CTA Calendly : préserver l'impression du fond sombre */
@@ -106,8 +105,13 @@
         background:#A8DCEC !important;
         color:#0A1F33 !important;
         border:none !important;
+        text-decoration:none !important;
       }
-      .cta-calendly .calendly-url{color:#A8DCEC !important;}
+      .cta-calendly .calendly-btn *{color:#0A1F33 !important;}
+      .cta-calendly .calendly-link{
+        color:#A8DCEC !important;
+        text-decoration:underline !important;
+      }
     }
   </style>
 </head>
@@ -921,6 +925,8 @@
             <p style={{fontFamily:F.s, fontSize:15, lineHeight:1.55, opacity:0.85, maxWidth:560, margin:'0 auto 28px'}}>
               Réservez 30 minutes avec un consultant Izzy All pour challenger ces conclusions et construire un plan d'action sur-mesure pour {lead.company||'votre organisation'}.
             </p>
+
+            {/* Bouton principal — cliquable */}
             <a href="https://calendly.com/commercial-izzysales/30min" target="_blank" rel="noopener noreferrer"
               className="calendly-btn"
               style={{
@@ -938,10 +944,18 @@
             >
               <Clock size={16}/> Réserver mon créneau (30 min)
             </a>
-            <div className="calendly-url" style={{marginTop:18, fontFamily:F.s, fontSize:12, opacity:0.7, letterSpacing:'0.04em'}}>
-              calendly.com/commercial-izzysales/30min
+
+            {/* URL comme texte cliquable — garantit la cliquabilité du PDF */}
+            <div style={{marginTop:20, fontFamily:F.s, fontSize:13, opacity:0.85}}>
+              ou cliquez directement :{' '}
+              <a href="https://calendly.com/commercial-izzysales/30min" target="_blank" rel="noopener noreferrer"
+                className="calendly-link"
+                style={{color:c.cyan, fontWeight:700, textDecoration:'underline', letterSpacing:'0.02em'}}>
+                calendly.com/commercial-izzysales/30min
+              </a>
             </div>
-            <div className="no-print" style={{marginTop:24, paddingTop:24, borderTop:'1px solid rgba(255,255,255,0.12)'}}>
+
+            <div className="no-print" style={{marginTop:28, paddingTop:24, borderTop:'1px solid rgba(255,255,255,0.12)'}}>
               <button onClick={()=>window.print()}
                 style={{background:'transparent', color:'#fff', border:`1px solid rgba(255,255,255,0.25)`, borderRadius:100, padding:'10px 20px', fontFamily:F.s, fontSize:12, fontWeight:500, cursor:'pointer', display:'inline-flex', alignItems:'center', gap:8}}>
                 <Download size={14}/> Télécharger ce rapport en PDF
@@ -949,14 +963,17 @@
             </div>
           </div>
 
-          {/* Footer répété sur chaque page imprimée */}
+          {/* Footer répété sur chaque page imprimée — avec URL Calendly cliquable */}
           <div className="print-footer">
             <div className="print-footer-brand">
               <img src={IZZY_LOGO} alt="Izzy All"/>
               <span>Izzy All — Audit Support Client</span>
             </div>
             <div>
-              Réservez votre échange : calendly.com/commercial-izzysales/30min
+              Réservez votre échange :{' '}
+              <a href="https://calendly.com/commercial-izzysales/30min">
+                calendly.com/commercial-izzysales/30min
+              </a>
             </div>
           </div>
         </section>
