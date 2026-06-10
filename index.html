@@ -11,9 +11,7 @@
     *,*::before,*::after{box-sizing:border-box;}
     html,body{margin:0;padding:0;min-height:100%;}
     body{background:#F4F8FB;}
-    input[type=number]{-moz-appearance:textfield;}
-    input[type=number]::-webkit-outer-spin-button,
-    input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none;margin:0;}
+    button{font-family:inherit;}
     @media print{
       .no-print{display:none!important;}
       body{background:white;}
@@ -31,8 +29,7 @@
   <script type="text/babel">
     const { useState, useMemo, useCallback } = React;
     const { RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar,
-            BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
-            ResponsiveContainer, PieChart, Pie, Cell, Legend } = Recharts;
+            Tooltip, ResponsiveContainer, PieChart, Pie, Cell } = Recharts;
 
     const IZZY_LOGO = 'data:image/png;base64,' + window.IZZY_LOGO_B64;
 
@@ -56,6 +53,10 @@
     const CheckCircle2 = p => <Ico {...p}><path d="M22 11.08V12a10 10 0 11-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></Ico>;
     const XCircle      = p => <Ico {...p}><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></Ico>;
     const Sparkles     = p => <Ico {...p}><path d="M12 3l1.09 3.36A4 4 0 0016.64 9.9L20 11l-3.36 1.09a4 4 0 00-2.55 2.55L13 18l-1.09-3.36A4 4 0 008.36 12.1L5 11l3.36-1.09a4 4 0 002.55-2.55L12 3z"/></Ico>;
+    const Clock        = p => <Ico {...p}><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></Ico>;
+    const Minus        = p => <Ico {...p}><line x1="5" y1="12" x2="19" y2="12"/></Ico>;
+    const Plus         = p => <Ico {...p}><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></Ico>;
+    const Users        = p => <Ico {...p}><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></Ico>;
 
     // ── PALETTE & TYPO ───────────────────────────────────────────
     const c = {
@@ -72,17 +73,37 @@
 
     // ── DONNÉES PAR DÉFAUT ───────────────────────────────────────
     const DEF = {
-      tickets:600, clients:320, agents:3, hoursPerAgent:152,
-      frt:8, mttr:48, fcr:52, globalResolution:82,
-      exchangesPerTicket:5, escalationRate:20,
-      nps:18, csat:68, complaints:22, negativeReviews:8,
-      techHours:55, commercialHours:35, repetitiveHours:65,
-      agentCost:3800, toolsCost:600, managersCost:1200,
-      cac:380, ltv:2800,
+      tickets:1000, clients:300, agents:3,
+      frt:8, mttr:48, escalationRate:20,
+      nps:15, csat:70, complaints:12,
+      techImpact:60, commercialImpact:40, repetitivePct:40,
     };
 
+    // ── NORMALISATION : converti les réponses simples en données complètes
+    function normalize(d) {
+      const agents = d.agents || 3;
+      // Heures cachées dérivées du % d'impact et de la base de tickets
+      const techHours = d.techImpact || 30;
+      const commercialHours = d.commercialImpact || 25;
+      const repetitiveHours = Math.round((d.repetitivePct||30)/100 * (d.tickets||600) * 0.3);
+      return {
+        tickets:d.tickets||600, clients:d.clients||300, agents, hoursPerAgent:152,
+        frt:d.frt||8, mttr:d.mttr||48, fcr:55, globalResolution:85,
+        exchangesPerTicket:4, escalationRate:d.escalationRate||20,
+        nps:d.nps??15, csat:d.csat??70, complaints:d.complaints||12,
+        negativeReviews:Math.round((d.complaints||12)*0.4),
+        techHours, commercialHours, repetitiveHours,
+        // Financier auto-calculé (moyennes B2B hospitality France)
+        agentCost:3500,
+        toolsCost:Math.max(200, agents*80),
+        managersCost:agents>3?Math.ceil(agents/5)*2000:agents>=2?800:0,
+        cac:400, ltv:3000,
+      };
+    }
+
     // ── CALCULS ──────────────────────────────────────────────────
-    function compute(d) {
+    function compute(raw) {
+      const d = normalize(raw);
       const frtScore  = d.frt<=1?100:d.frt<=4?80:d.frt<=12?55:d.frt<=24?30:10;
       const mttrScore = d.mttr<=4?100:d.mttr<=12?85:d.mttr<=24?65:d.mttr<=72?40:20;
       const fcrScore  = Math.min(100,Math.max(0,d.fcr*1.25));
@@ -99,7 +120,7 @@
       const direct    = d.agents*d.agentCost+d.toolsCost+d.managersCost;
       const cpt       = d.tickets>0?direct/d.tickets:0;
       const costScore = cpt<=8?100:cpt<=18?80:cpt<=35?55:cpt<=60?30:15;
-      const ltvCac    = d.cac>0?d.ltv/d.cac:0;
+      const ltvCac    = d.ltv/d.cac;
       const ltvScore  = ltvCac>=5?100:ltvCac>=3?80:ltvCac>=2?60:ltvCac>=1?35:15;
       const financial = (costScore+ltvScore)/2;
       const global    = Math.round(performance*0.30+satisfaction*0.30+productivity*0.20+financial*0.20);
@@ -121,216 +142,375 @@
       return {scores:{performance,satisfaction,productivity,financial,global},
               cat,catColor,catDesc,direct,totalH,totalR,hTech,hComm,hRep,hEsc,
               cpt,ltvCac,churn,atRisk,revAtRisk,cmpRatio,wasted,savings,roi,recov,
-              newMttr:d.mttr*0.6,newFcr:Math.min(95,d.fcr*1.25),newNps:Math.min(100,d.nps+14)};
+              newMttr:d.mttr*0.6,newFcr:Math.min(95,55*1.25),newNps:Math.min(100,d.nps+14),
+              normalized:d};
     }
 
     function generateDiag(d,r) {
       const str=[],wk=[],rec=[];
+      const n = r.normalized;
       if(r.scores.performance>=70) str.push({t:'Performance opérationnelle solide',d:'Vos délais de réponse et de résolution se situent dans les standards du marché.'});
-      if(r.scores.satisfaction>=70) str.push({t:'Satisfaction client préservée',d:`NPS de ${d.nps} et CSAT de ${d.csat}% dans des niveaux acceptables.`});
-      if(d.fcr>=70) str.push({t:'Résolution au 1er contact efficace',d:`${d.fcr}% des tickets résolus sans échange supplémentaire.`});
-      if(r.ltvCac>=3) str.push({t:'Économie unitaire saine',d:`Ratio LTV/CAC de ${r.ltvCac.toFixed(1)} — chaque acquisition génère de la valeur durable.`});
-      if(!str.length) str.push({t:'Démarche d\'amélioration engagée',d:'Réaliser cet audit témoigne d\'une volonté de progrès. C\'est le bon point de départ.'});
-      if(d.frt>4) wk.push({t:'Temps de première réponse trop long',d:`${d.frt}h — au-delà du seuil B2B de 4h.`,s:'high'});
-      if(d.mttr>24) wk.push({t:'Temps de résolution excessif',d:`${d.mttr}h pour clore un ticket.`,s:d.mttr>72?'high':'med'});
-      if(d.fcr<60) wk.push({t:'Faible résolution au 1er contact',d:`${d.fcr}% seulement — multiplication des échanges.`,s:d.fcr<40?'high':'med'});
-      if(d.escalationRate>15) wk.push({t:'Taux d\'escalade élevé',d:`${d.escalationRate}% — surcharge des équipes techniques.`,s:d.escalationRate>25?'high':'med'});
-      if(d.nps<30) wk.push({t:'NPS sous-performant',d:`NPS de ${d.nps} — risque de bouche-à-oreille négatif.`,s:d.nps<10?'high':'med'});
+      if(r.scores.satisfaction>=70) str.push({t:'Satisfaction client préservée',d:`NPS de ${n.nps} et CSAT de ${n.csat}% dans des niveaux acceptables.`});
+      if(r.ltvCac>=3) str.push({t:'Économie unitaire saine',d:`Ratio LTV/CAC estimé de ${r.ltvCac.toFixed(1)} — chaque acquisition génère de la valeur durable.`});
+      if(!str.length) str.push({t:"Démarche d'amélioration engagée",d:"Réaliser cet audit témoigne d'une volonté de progrès. C'est le bon point de départ."});
+      if(n.frt>4) wk.push({t:'Temps de première réponse trop long',d:`${n.frt}h — au-delà du seuil B2B de 4h.`,s:'high'});
+      if(n.mttr>24) wk.push({t:'Temps de résolution excessif',d:`${n.mttr}h pour clore un ticket.`,s:n.mttr>72?'high':'med'});
+      if(n.escalationRate>15) wk.push({t:"Taux d'escalade élevé",d:`${n.escalationRate}% — surcharge des équipes techniques.`,s:n.escalationRate>25?'high':'med'});
+      if(n.nps<30) wk.push({t:'NPS sous-performant',d:`NPS de ${n.nps} — risque de bouche-à-oreille négatif.`,s:n.nps<10?'high':'med'});
       if(r.totalH>r.direct*0.4) wk.push({t:'Coûts cachés massifs',d:`${fmt(r.totalH)}€/mois absorbés par les équipes hors support.`,s:'high'});
       if(r.churn>12) wk.push({t:'Risque de churn élevé',d:`${r.atRisk} clients exposés, soit ${fmt(r.revAtRisk)}€.`,s:r.churn>20?'high':'med'});
-      if(d.frt>4) rec.push({p:1,t:'Routage et SLA par criticité',i:'FRT divisé par 2 à 3',d:'Catégoriser dès la création, prioriser par impact business.'});
-      if(d.fcr<60) rec.push({p:1,t:'Base de connaissance opérationnelle',i:'+15 à +25 pts FCR',d:'Documenter les 80% de cas récurrents, macros et arbres de décision.'});
-      if(r.totalH>r.direct*0.3) rec.push({p:1,t:'Isoler le support des équipes produit',i:`${fmt(r.totalH*0.7)}€/mois récupérés`,d:'Filtre L1 strict, procédure d\'escalade rigoureuse.'});
-      if(d.repetitiveHours>40) rec.push({p:2,t:'Automatiser les demandes répétitives',i:`${Math.round(d.repetitiveHours*0.6)}h/mois récupérées`,d:'Self-service, chatbot, FAQ contextuelle, statut en temps réel.'});
+      if(n.frt>4) rec.push({p:1,t:'Routage et SLA par criticité',i:'FRT divisé par 2 à 3',d:'Catégoriser dès la création, prioriser par impact business.'});
+      if(r.totalH>r.direct*0.3) rec.push({p:1,t:'Isoler le support des équipes produit',i:`${fmt(r.totalH*0.7)}€/mois récupérés`,d:"Filtre L1 strict, procédure d'escalade rigoureuse."});
+      if(n.repetitiveHours>40) rec.push({p:2,t:'Automatiser les demandes répétitives',i:`${Math.round(n.repetitiveHours*0.6)}h/mois récupérées`,d:'Self-service, chatbot, FAQ contextuelle, statut en temps réel.'});
       if(r.churn>12) rec.push({p:1,t:'Programme de récupération client proactif',i:`${Math.round(r.atRisk*0.5)} clients sauvegardés`,d:'Identifier les comptes à risque et déclencher un suivi commercial.'});
-      if(r.scores.global<60) rec.push({p:1,t:'Évaluer l\'externalisation du support',i:`${fmt(r.savings)}€/an estimés`,d:'Un partenaire spécialisé apporte process matures et scalabilité immédiate.'});
-      if(d.nps<30) rec.push({p:2,t:'Boucle de feedback systématique',i:'+8 à +15 pts NPS',d:'CSAT après chaque clôture, analyse hebdo des verbatim.'});
+      if(r.scores.global<60) rec.push({p:1,t:"Évaluer l'externalisation du support",i:`${fmt(r.savings)}€/an estimés`,d:'Un partenaire spécialisé apporte process matures et scalabilité immédiate.'});
+      if(n.nps<30) rec.push({p:2,t:'Boucle de feedback systématique',i:'+8 à +15 pts NPS',d:'CSAT après chaque clôture, analyse hebdo des verbatim.'});
       rec.sort((a,b)=>a.p-b.p);
       return {str,wk,rec};
     }
 
     // ── COMPOSANTS UI ────────────────────────────────────────────
-    const Field = ({label,value,onChange,suffix,hint,type='number'}) => (
-      <label style={{display:'block',marginBottom:24}}>
-        <div style={{fontFamily:F.s,fontSize:13,fontWeight:600,color:c.ink,marginBottom:6,minHeight:18,lineHeight:'18px'}}>{label}</div>
-        <div style={{fontFamily:F.s,fontSize:12,color:c.muted,marginBottom:8,fontStyle:'italic',minHeight:17,lineHeight:'17px'}}>{hint||'\u00A0'}</div>
-        <div style={{position:'relative',display:'flex',alignItems:'center'}}>
-          <input type={type} value={value}
-            onChange={e=>onChange(type==='number'?Number(e.target.value):e.target.value)}
-            style={{width:'100%',padding:'12px 14px',paddingRight:suffix?60:14,
-                    fontFamily:F.s,fontSize:15,fontWeight:500,color:c.ink,
-                    background:c.cream,border:`1px solid ${c.rule}`,borderRadius:6,
-                    outline:'none',transition:'border-color 0.2s',fontVariantNumeric:'tabular-nums'}}
-            onFocus={e=>{e.target.style.borderColor=c.accent;e.target.style.background='#fff';}}
-            onBlur={e=>{e.target.style.borderColor=c.rule;e.target.style.background=c.cream;}}
-          />
-          {suffix&&<span style={{position:'absolute',right:14,fontFamily:F.s,fontSize:12,color:c.muted,fontWeight:500}}>{suffix}</span>}
-        </div>
-      </label>
-    );
-
-    const Card = ({label,value,sub,accent,icon:Ic}) => (
-      <div style={{border:`1px solid ${c.rule}`,background:c.cream,padding:'22px 24px',borderRadius:8,position:'relative',overflow:'hidden'}}>
-        <div style={{position:'absolute',top:0,left:0,width:3,height:'100%',background:accent||c.rule}}/>
-        <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:12}}>
-          <div style={{fontFamily:F.s,fontSize:10,fontWeight:600,letterSpacing:'0.15em',color:c.muted,textTransform:'uppercase'}}>{label}</div>
-          {Ic&&<Ic size={18} color={accent||c.muted} sw={1.5}/>}
-        </div>
-        <div style={{fontFamily:F.d,fontSize:32,fontWeight:700,color:c.ink,lineHeight:1,letterSpacing:'-0.02em'}}>{value}</div>
-        {sub&&<div style={{fontFamily:F.s,fontSize:12,color:c.muted,marginTop:8,lineHeight:1.4}}>{sub}</div>}
+    // CardSelect — sélection visuelle par cartes (cœur du nouveau UX)
+    const CardSelect = ({value, onChange, options}) => (
+      <div style={{display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(180px, 1fr))', gap:10}}>
+        {options.map((o,i) => {
+          const selected = value === o.v;
+          return (
+            <button key={i} type="button" onClick={() => onChange(o.v)}
+              style={{
+                padding:'16px 18px',
+                background: selected ? c.cyan : c.cream,
+                color: c.ink,
+                border: selected ? `2px solid ${c.accent}` : `1px solid ${c.rule}`,
+                borderRadius: 8,
+                fontFamily: F.s, fontSize: 14, fontWeight: 600,
+                cursor: 'pointer', textAlign: 'left',
+                transition: 'all 0.15s',
+                lineHeight: 1.35,
+                position:'relative',
+                paddingLeft: selected ? 17 : 18,
+              }}
+              onMouseEnter={e=>{if(!selected){e.currentTarget.style.borderColor=c.accent;e.currentTarget.style.background='#FBFDFE';}}}
+              onMouseLeave={e=>{if(!selected){e.currentTarget.style.borderColor=c.rule;e.currentTarget.style.background=c.cream;}}}
+            >
+              {o.l}
+            </button>
+          );
+        })}
       </div>
     );
 
-    const Btn = ({onClick,disabled,children,secondary,style:sx={}}) => (
+    // Stepper — pour les petits nombres (agents)
+    const Stepper = ({value, onChange, min=1, max=50}) => (
+      <div style={{display:'flex', alignItems:'center', gap:0, border:`1px solid ${c.rule}`, borderRadius:100, padding:6, width:'fit-content', background:c.cream}}>
+        <button type="button" onClick={()=>onChange(Math.max(min, value-1))}
+          style={{width:44,height:44,borderRadius:'50%',border:'none',background:value>min?c.paperDeep:'transparent',cursor:value>min?'pointer':'not-allowed',display:'flex',alignItems:'center',justifyContent:'center',opacity:value>min?1:0.4}}>
+          <Minus size={18} color={c.ink}/>
+        </button>
+        <div style={{width:80, textAlign:'center', fontFamily:F.d, fontSize:28, fontWeight:700, color:c.ink}}>{value}</div>
+        <button type="button" onClick={()=>onChange(Math.min(max, value+1))}
+          style={{width:44,height:44,borderRadius:'50%',border:'none',background:value<max?c.paperDeep:'transparent',cursor:value<max?'pointer':'not-allowed',display:'flex',alignItems:'center',justifyContent:'center',opacity:value<max?1:0.4}}>
+          <Plus size={18} color={c.ink}/>
+        </button>
+      </div>
+    );
+
+    // Champ texte standard pour le formulaire lead
+    const TextInput = ({label, value, onChange, type='text', hint}) => (
+      <label style={{display:'block', marginBottom:24}}>
+        <div style={{fontFamily:F.s, fontSize:13, fontWeight:600, color:c.ink, marginBottom:6}}>{label}</div>
+        {hint && <div style={{fontFamily:F.s, fontSize:12, color:c.muted, marginBottom:8, fontStyle:'italic'}}>{hint}</div>}
+        <input type={type} value={value} onChange={e=>onChange(e.target.value)}
+          style={{
+            width:'100%', padding:'12px 14px',
+            fontFamily:F.s, fontSize:15, fontWeight:500, color:c.ink,
+            background:c.cream, border:`1px solid ${c.rule}`, borderRadius:6,
+            outline:'none', transition:'border-color 0.2s',
+          }}
+          onFocus={e=>{e.target.style.borderColor=c.accent;e.target.style.background='#fff';}}
+          onBlur={e=>{e.target.style.borderColor=c.rule;e.target.style.background=c.cream;}}
+        />
+      </label>
+    );
+
+    const Card = ({label, value, sub, accent, icon:Ic}) => (
+      <div style={{border:`1px solid ${c.rule}`, background:c.cream, padding:'22px 24px', borderRadius:8, position:'relative', overflow:'hidden'}}>
+        <div style={{position:'absolute',top:0,left:0,width:3,height:'100%',background:accent||c.rule}}/>
+        <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:12}}>
+          <div style={{fontFamily:F.s,fontSize:10,fontWeight:600,letterSpacing:'0.15em',color:c.muted,textTransform:'uppercase'}}>{label}</div>
+          {Ic && <Ic size={18} color={accent||c.muted} sw={1.5}/>}
+        </div>
+        <div style={{fontFamily:F.d,fontSize:32,fontWeight:700,color:c.ink,lineHeight:1,letterSpacing:'-0.02em'}}>{value}</div>
+        {sub && <div style={{fontFamily:F.s,fontSize:12,color:c.muted,marginTop:8,lineHeight:1.4}}>{sub}</div>}
+      </div>
+    );
+
+    const Btn = ({onClick, disabled, children, secondary, style:sx={}}) => (
       <button onClick={onClick} disabled={disabled}
-        style={{padding:'13px 24px',background:secondary?'transparent':c.cyan,
-                color:secondary?c.inkSoft:c.ink,border:secondary?`1px solid ${c.rule}`:'none',
-                borderRadius:100,fontFamily:F.s,fontSize:13,fontWeight:secondary?500:700,
-                letterSpacing:secondary?0:'0.06em',textTransform:secondary?'none':'uppercase',
-                cursor:disabled?'not-allowed':'pointer',
-                display:'inline-flex',alignItems:'center',gap:8,
-                opacity:disabled?0.5:1,transition:'all 0.2s',...sx}}
+        style={{
+          padding:'13px 24px',
+          background: secondary ? 'transparent' : c.cyan,
+          color: secondary ? c.inkSoft : c.ink,
+          border: secondary ? `1px solid ${c.rule}` : 'none',
+          borderRadius: 100,
+          fontFamily: F.s, fontSize: 13,
+          fontWeight: secondary ? 500 : 700,
+          letterSpacing: secondary ? 0 : '0.06em',
+          textTransform: secondary ? 'none' : 'uppercase',
+          cursor: disabled ? 'not-allowed' : 'pointer',
+          display: 'inline-flex', alignItems: 'center', gap: 8,
+          opacity: disabled ? 0.5 : 1, transition: 'all 0.2s',
+          ...sx
+        }}
         onMouseEnter={e=>{if(!disabled)e.currentTarget.style.background=secondary?c.paperDeep:'#BAE4F0';}}
         onMouseLeave={e=>{if(!disabled)e.currentTarget.style.background=secondary?'transparent':c.cyan;}}
       >{children}</button>
     );
 
-    const Rule = ({label,num}) => (
-      <div style={{display:'flex',alignItems:'center',gap:16,margin:'48px 0 24px'}}>
-        <div style={{fontFamily:F.s,fontSize:10,fontWeight:700,letterSpacing:'0.18em',color:c.muted,textTransform:'uppercase',whiteSpace:'nowrap'}}>{num} — {label}</div>
-        <div style={{flex:1,height:1,background:c.rule}}/>
+    const Rule = ({label, num}) => (
+      <div style={{display:'flex', alignItems:'center', gap:16, margin:'48px 0 24px'}}>
+        <div style={{fontFamily:F.s, fontSize:10, fontWeight:700, letterSpacing:'0.18em', color:c.muted, textTransform:'uppercase', whiteSpace:'nowrap'}}>{num} — {label}</div>
+        <div style={{flex:1, height:1, background:c.rule}}/>
       </div>
     );
 
-    const Header = ({stage,step}) => (
-      <header className="no-print" style={{borderBottom:`1px solid ${c.rule}`,padding:'18px 32px',
-                background:c.paper,position:'sticky',top:0,zIndex:10,backdropFilter:'blur(6px)'}}>
-        <div style={{maxWidth:1180,margin:'0 auto',display:'flex',alignItems:'center',justifyContent:'space-between'}}>
-          <div style={{display:'flex',alignItems:'center',gap:14}}>
-            <img src={IZZY_LOGO} alt="Izzy All" style={{width:40,height:'auto',flexShrink:0}}/>
+    const Header = ({stage, step, totalSteps}) => (
+      <header className="no-print" style={{borderBottom:`1px solid ${c.rule}`, padding:'18px 32px', background:c.paper, position:'sticky', top:0, zIndex:10, backdropFilter:'blur(6px)'}}>
+        <div style={{maxWidth:1180, margin:'0 auto', display:'flex', alignItems:'center', justifyContent:'space-between'}}>
+          <div style={{display:'flex', alignItems:'center', gap:14}}>
+            <img src={IZZY_LOGO} alt="Izzy All" style={{width:40, height:'auto', flexShrink:0}}/>
             <div>
-              <div style={{fontFamily:F.d,fontSize:20,fontWeight:800,lineHeight:1,color:c.ink}}>Izzy All</div>
-              <div style={{fontFamily:F.s,fontSize:9,letterSpacing:'0.15em',color:c.muted,textTransform:'uppercase',marginTop:3,fontWeight:600}}>Audit Support Client</div>
+              <div style={{fontFamily:F.d, fontSize:20, fontWeight:800, lineHeight:1, color:c.ink}}>Izzy All</div>
+              <div style={{fontFamily:F.s, fontSize:9, letterSpacing:'0.15em', color:c.muted, textTransform:'uppercase', marginTop:3, fontWeight:600}}>Audit Support Client</div>
             </div>
           </div>
-          <div style={{fontFamily:F.s,fontSize:12,color:c.muted,fontWeight:500}}>
-            {stage==='form'&&`Étape ${step+1} / 5`}
-            {stage==='results'&&'Rapport généré'}
-            {stage==='landing'&&'Diagnostic Gratuit · 2026'}
-            {stage==='lead'&&'Génération du rapport'}
+          <div style={{fontFamily:F.s, fontSize:12, color:c.muted, fontWeight:500}}>
+            {stage==='form' && `Étape ${step+1} / ${totalSteps}`}
+            {stage==='results' && 'Rapport généré'}
+            {stage==='landing' && 'Diagnostic Gratuit · 2026'}
+            {stage==='lead' && 'Génération du rapport'}
           </div>
         </div>
       </header>
     );
 
     const Footer = () => (
-      <footer style={{marginTop:80,padding:'28px 32px',borderTop:`1px solid ${c.rule}`,
-               fontFamily:F.s,fontSize:10,color:c.muted,letterSpacing:'0.1em',textTransform:'uppercase'}}>
-        <div style={{maxWidth:1180,margin:'0 auto',display:'flex',justifyContent:'space-between',flexWrap:'wrap',gap:12}}>
+      <footer style={{marginTop:80, padding:'28px 32px', borderTop:`1px solid ${c.rule}`, fontFamily:F.s, fontSize:10, color:c.muted, letterSpacing:'0.1em', textTransform:'uppercase'}}>
+        <div style={{maxWidth:1180, margin:'0 auto', display:'flex', justifyContent:'space-between', flexWrap:'wrap', gap:12}}>
           <span>© Izzy All — Accompagnement B2B premium · Hospitality</span>
           <span>izzyall.fr · Méthodologie propriétaire</span>
         </div>
       </footer>
     );
 
+    // ── CONFIGURATION SIMPLIFIÉE — 4 ÉTAPES, 12 QUESTIONS ──────────
     const STEPS = [
-      {title:'Volume',num:'01',desc:'Cadrer l\'échelle et la charge de votre activité support.',fields:[
-        {k:'tickets',label:'Nombre de tickets / mois',hint:'Toutes catégories confondues',sfx:'tickets'},
-        {k:'clients',label:'Nombre de clients actifs',hint:'Clients facturés ce mois',sfx:'clients'},
-        {k:'agents',label:'Agents support (ETP)',hint:'Équivalents temps-plein dédiés',sfx:'agents'},
-        {k:'hoursPerAgent',label:'Heures travaillées / agent / mois',hint:'Hors congés et absences',sfx:'h'},
-      ]},
-      {title:'Performance',num:'02',desc:'Vitesse, efficacité et qualité de traitement des demandes.',fields:[
-        {k:'frt',label:'Temps de première réponse (FRT)',hint:'Délai moyen avant la 1ère réponse humaine',sfx:'heures'},
-        {k:'mttr',label:'Temps moyen de résolution (MTTR)',hint:'De l\'ouverture à la clôture définitive',sfx:'heures'},
-        {k:'fcr',label:'Taux de résolution au 1er contact',hint:'Tickets résolus sans échange supplémentaire',sfx:'%'},
-        {k:'globalResolution',label:'Taux de résolution global',hint:'Sur l\'ensemble des tickets ouverts',sfx:'%'},
-        {k:'exchangesPerTicket',label:'Échanges moyens par ticket',hint:'Messages aller-retour par ticket',sfx:'msg'},
-        {k:'escalationRate',label:'Taux d\'escalade (L1 → L2/L3)',hint:'Part des tickets remontés aux équipes techniques',sfx:'%'},
-      ]},
-      {title:'Satisfaction',num:'03',desc:'Perception client et signaux d\'alerte.',fields:[
-        {k:'nps',label:'NPS',hint:'Net Promoter Score — échelle de -100 à +100',sfx:'pts'},
-        {k:'csat',label:'CSAT',hint:'Satisfaction client moyenne post-résolution',sfx:'%'},
-        {k:'complaints',label:'Réclamations formelles / mois',hint:'Tickets classés réclamation ou escalade client',sfx:''},
-        {k:'negativeReviews',label:'Avis négatifs publics / mois',hint:'Trustpilot, G2, Google…',sfx:''},
-      ]},
-      {title:'Productivité',num:'04',desc:'Le temps caché absorbé par des équipes hors support.',fields:[
-        {k:'techHours',label:'Heures équipes techniques / mois',hint:'Développeurs, ingénieurs mobilisés sur le support',sfx:'h'},
-        {k:'commercialHours',label:'Heures équipes commerciales / mois',hint:'Account managers absorbés par des demandes clients',sfx:'h'},
-        {k:'repetitiveHours',label:'Heures perdues sur demandes répétitives',hint:'Mots de passe, statuts, FAQ basiques…',sfx:'h'},
-      ]},
-      {title:'Financier',num:'05',desc:'Structure de coûts et économie unitaire.',fields:[
-        {k:'agentCost',label:'Coût mensuel chargé / agent',hint:'Salaire brut + charges + équipement',sfx:'€'},
-        {k:'toolsCost',label:'Coût outils support / mois',hint:'Ticketing, KB, CRM, IA…',sfx:'€'},
-        {k:'managersCost',label:'Coût management dédié / mois',hint:'Encadrement + coordination du pôle support',sfx:'€'},
-        {k:'cac',label:'CAC — Coût d\'acquisition client',hint:'Budget marketing+sales ÷ nouveaux clients',sfx:'€'},
-        {k:'ltv',label:'LTV — Valeur vie client',hint:'Revenu moyen sur la durée de la relation',sfx:'€'},
-      ]},
+      {
+        title:'Votre équipe', num:'01',
+        desc:"Pour cadrer l'échelle de votre activité support.",
+        fields:[
+          {k:'tickets', type:'cards',
+           label:'Combien de tickets traitez-vous chaque mois ?',
+           options:[
+             {l:'Moins de 200', v:100},
+             {l:'200 à 500', v:350},
+             {l:'500 à 1 500', v:1000},
+             {l:'1 500 à 5 000', v:3000},
+             {l:'Plus de 5 000', v:7500},
+           ]},
+          {k:'clients', type:'cards',
+           label:'Combien de clients actifs avez-vous ?',
+           options:[
+             {l:'Moins de 100', v:50},
+             {l:'100 à 500', v:300},
+             {l:'500 à 2 000', v:1200},
+             {l:'2 000 à 10 000', v:5000},
+             {l:'Plus de 10 000', v:15000},
+           ]},
+          {k:'agents', type:'stepper',
+           label:"Combien d'agents support à temps plein dans votre équipe ?",
+           hint:'En équivalents temps plein dédiés',
+           min:1, max:50},
+        ]
+      },
+      {
+        title:'Vos délais', num:'02',
+        desc:"Rapidité de prise en charge et de résolution des demandes.",
+        fields:[
+          {k:'frt', type:'cards',
+           label:"En moyenne, combien de temps avant qu'un client reçoive une première réponse ?",
+           options:[
+             {l:"Moins d'1 heure", v:0.5},
+             {l:'1 à 4 heures', v:2},
+             {l:'4 à 12 heures', v:8},
+             {l:'12 à 24 heures', v:18},
+             {l:'Plus de 24 heures', v:36},
+           ]},
+          {k:'mttr', type:'cards',
+           label:'Combien de temps en moyenne pour clore un ticket ?',
+           options:[
+             {l:'Moins de 4 heures', v:2},
+             {l:'4 à 24 heures', v:12},
+             {l:'1 à 3 jours', v:48},
+             {l:'3 à 7 jours', v:120},
+             {l:"Plus d'une semaine", v:200},
+           ]},
+          {k:'escalationRate', type:'cards',
+           label:'Quelle part des tickets remonte vers les équipes techniques (L2/L3) ?',
+           options:[
+             {l:'Moins de 10%', v:5},
+             {l:'10 à 25%', v:17},
+             {l:'25 à 50%', v:35},
+             {l:'Plus de 50%', v:60},
+             {l:'Je ne sais pas', v:20},
+           ]},
+        ]
+      },
+      {
+        title:'Satisfaction client', num:'03',
+        desc:"Comment vos clients vivent l'expérience support.",
+        fields:[
+          {k:'nps', type:'cards',
+           label:'Quel est votre NPS approximatif ?',
+           hint:'Net Promoter Score — Indicateur de recommandation',
+           options:[
+             {l:'Très bas (négatif)', v:-30},
+             {l:'Bas (0 à 20)', v:10},
+             {l:'Moyen (20 à 50)', v:35},
+             {l:'Bon (50 à 70)', v:60},
+             {l:'Excellent (>70)', v:80},
+             {l:'Je ne mesure pas', v:15},
+           ]},
+          {k:'csat', type:'cards',
+           label:'Quel est votre CSAT moyen ?',
+           hint:'Satisfaction client après résolution',
+           options:[
+             {l:'Moins de 60%', v:50},
+             {l:'60 à 75%', v:68},
+             {l:'75 à 85%', v:80},
+             {l:'Plus de 85%', v:90},
+             {l:'Je ne mesure pas', v:70},
+           ]},
+          {k:'complaints', type:'cards',
+           label:'Combien de réclamations formelles recevez-vous par mois ?',
+           options:[
+             {l:'Très peu (0 à 5)', v:3},
+             {l:'Modérément (5 à 20)', v:12},
+             {l:'Beaucoup (20 à 50)', v:35},
+             {l:'Énormément (>50)', v:75},
+           ]},
+        ]
+      },
+      {
+        title:'Impact sur les autres équipes', num:'04',
+        desc:"Le support déborde-t-il sur vos équipes techniques et commerciales ?",
+        fields:[
+          {k:'techImpact', type:'cards',
+           label:'À quelle fréquence vos équipes techniques sont-elles sollicitées sur des demandes support ?',
+           options:[
+             {l:'Jamais', v:0},
+             {l:'Rarement', v:15},
+             {l:'Régulièrement', v:45},
+             {l:'Souvent', v:90},
+             {l:'En permanence', v:160},
+           ]},
+          {k:'commercialImpact', type:'cards',
+           label:'Vos équipes commerciales traitent-elles des demandes qui relèvent du support ?',
+           options:[
+             {l:'Jamais', v:0},
+             {l:'Rarement', v:12},
+             {l:'Régulièrement', v:35},
+             {l:'Souvent', v:70},
+             {l:'En permanence', v:130},
+           ]},
+          {k:'repetitivePct', type:'cards',
+           label:'Quelle part de vos tickets sont des demandes répétitives ?',
+           hint:'Mots de passe, statuts de commande, FAQ basique…',
+           options:[
+             {l:'Moins de 20%', v:10},
+             {l:'20 à 40%', v:30},
+             {l:'40 à 60%', v:50},
+             {l:'Plus de 60%', v:75},
+           ]},
+        ]
+      },
     ];
 
-    const W = ({stage,step,children}) => (
-      <div style={{minHeight:'100vh',background:c.paper,fontFamily:F.s,color:c.ink,paddingBottom:80}}>
-        <Header stage={stage} step={step}/>
-        <div style={{maxWidth:1180,margin:'0 auto',padding:'0 32px'}}>{children}</div>
+    // ── PAGE WRAPPER ─────────────────────────────────────────────
+    const W = ({stage, step, totalSteps, children}) => (
+      <div style={{minHeight:'100vh', background:c.paper, fontFamily:F.s, color:c.ink, paddingBottom:80}}>
+        <Header stage={stage} step={step} totalSteps={totalSteps}/>
+        <div style={{maxWidth:1180, margin:'0 auto', padding:'0 32px'}}>{children}</div>
         <Footer/>
+      </div>
+    );
+
+    // ── FORMULAIRE ÉTAPE — RENDU GÉNÉRIQUE PAR TYPE ──────────────
+    const FormField = ({field, value, onChange}) => (
+      <div style={{marginBottom:40}}>
+        <div style={{fontFamily:F.d, fontSize:19, fontWeight:700, color:c.ink, marginBottom: field.hint ? 4 : 18, lineHeight:1.3, letterSpacing:'-0.01em'}}>
+          {field.label}
+        </div>
+        {field.hint && (
+          <div style={{fontFamily:F.s, fontSize:13, color:c.muted, marginBottom:18, fontStyle:'italic'}}>
+            {field.hint}
+          </div>
+        )}
+        {field.type === 'cards' && <CardSelect value={value} onChange={onChange} options={field.options}/>}
+        {field.type === 'stepper' && <Stepper value={value} onChange={onChange} min={field.min} max={field.max}/>}
       </div>
     );
 
     // ── APP ──────────────────────────────────────────────────────
     function App() {
-      const [stage,setStage] = useState('landing');
-      const [step,setStep]   = useState(0);
-      const [data,setData]   = useState(DEF);
-      const [lead,setLead]   = useState({name:'',company:'',email:'',phone:''});
-      const updLead = useCallback(k => v => setLead(l => ({...l,[k]:v})), []);
+      const [stage, setStage] = useState('landing');
+      const [step, setStep] = useState(0);
+      const [data, setData] = useState(DEF);
+      const [lead, setLead] = useState({name:'', company:'', email:'', phone:''});
 
-      const upd = useCallback(k => v => setData(d => ({...d,[k]:v})), []);
-      const res  = useMemo(()=>compute(data),[data]);
-      const diag = useMemo(()=>generateDiag(data,res),[data,res]);
-      const cs   = STEPS[step];
-      const pct  = ((step+1)/STEPS.length)*100;
-      const ok   = lead.name&&lead.company&&lead.email;
+      const upd = useCallback(k => v => setData(d => ({...d, [k]:v})), []);
+      const updLead = useCallback(k => v => setLead(l => ({...l, [k]:v})), []);
+      const res = useMemo(() => compute(data), [data]);
+      const diag = useMemo(() => generateDiag(data, res), [data, res]);
+      const cs = STEPS[step];
+      const pct = ((step+1)/STEPS.length)*100;
+      const ok = lead.name && lead.company && lead.email;
 
       // LANDING
-      if(stage==='landing') return <W stage={stage} step={step}>
-        <section style={{padding:'90px 0 60px',position:'relative'}}>
-          <div style={{position:'absolute',top:40,right:-30,opacity:0.08,userSelect:'none',pointerEvents:'none'}}>
-            <img src={IZZY_LOGO} alt="" style={{width:420,height:'auto'}}/>
+      if(stage==='landing') return <W stage={stage} step={step} totalSteps={STEPS.length}>
+        <section style={{padding:'90px 0 60px', position:'relative'}}>
+          <div style={{position:'absolute', top:40, right:-30, opacity:0.08, userSelect:'none', pointerEvents:'none'}}>
+            <img src={IZZY_LOGO} alt="" style={{width:420, height:'auto'}}/>
           </div>
-          <div style={{position:'relative',maxWidth:820}}>
-            <div style={{display:'inline-flex',alignItems:'center',gap:8,padding:'6px 16px',
-                        border:`1px solid ${c.rule}`,borderRadius:100,background:c.cream,
-                        fontFamily:F.s,fontSize:10,fontWeight:600,letterSpacing:'0.15em',
-                        color:c.inkSoft,textTransform:'uppercase',marginBottom:36}}>
-              <span style={{width:7,height:7,borderRadius:'50%',background:c.cyan,display:'inline-block'}}/>
-              Audit gratuit · 5 minutes · Restitution immédiate
+          <div style={{position:'relative', maxWidth:820}}>
+            <div style={{display:'inline-flex', alignItems:'center', gap:8, padding:'6px 16px', border:`1px solid ${c.rule}`, borderRadius:100, background:c.cream, fontFamily:F.s, fontSize:10, fontWeight:600, letterSpacing:'0.15em', color:c.inkSoft, textTransform:'uppercase', marginBottom:36}}>
+              <span style={{width:7, height:7, borderRadius:'50%', background:c.cyan, display:'inline-block'}}/>
+              Audit gratuit · 3 minutes · Restitution immédiate
             </div>
-            <h1 style={{fontFamily:F.d,fontSize:'clamp(44px,7vw,84px)',fontWeight:800,
-                       lineHeight:1,letterSpacing:'-0.03em',margin:0,color:c.ink}}>
+            <h1 style={{fontFamily:F.d, fontSize:'clamp(44px,7vw,84px)', fontWeight:800, lineHeight:1, letterSpacing:'-0.03em', margin:0, color:c.ink}}>
               Combien vous coûte<br/>
-              <span style={{color:c.accent,fontStyle:'italic'}}>réellement</span> votre<br/>
+              <span style={{color:c.accent, fontStyle:'italic'}}>réellement</span> votre<br/>
               support client ?
             </h1>
-            <p style={{fontFamily:F.s,fontSize:18,lineHeight:1.55,color:c.inkSoft,maxWidth:580,marginTop:32}}>
-              Un diagnostic de 22 indicateurs pour révéler les coûts cachés,
-              mesurer votre maturité opérationnelle et chiffrer le potentiel d'externalisation.
+            <p style={{fontFamily:F.s, fontSize:18, lineHeight:1.55, color:c.inkSoft, maxWidth:580, marginTop:32}}>
+              <strong>12 questions simples</strong> pour révéler les coûts cachés, mesurer votre maturité et chiffrer le potentiel d'externalisation. Aucun chiffre exact requis — vous cliquez sur la fourchette qui correspond.
             </p>
-            <div style={{display:'flex',gap:16,marginTop:44,alignItems:'center',flexWrap:'wrap'}}>
+            <div style={{display:'flex', gap:16, marginTop:44, alignItems:'center', flexWrap:'wrap'}}>
               <Btn onClick={()=>setStage('form')}>Démarrer l'audit <ArrowRight size={16}/></Btn>
-              <span style={{fontFamily:F.s,fontSize:11,color:c.muted,letterSpacing:'0.06em'}}>Aucune création de compte requise</span>
+              <span style={{fontFamily:F.s, fontSize:11, color:c.muted, letterSpacing:'0.06em'}}>Aucune création de compte requise</span>
             </div>
           </div>
-          <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(200px,1fr))',marginTop:70,borderTop:`1px solid ${c.rule}`}}>
+          <div style={{display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(200px, 1fr))', marginTop:70, borderTop:`1px solid ${c.rule}`}}>
             {[
-              {Ic:DollarSign,t:'Coût réel',d:'Coûts cachés des équipes tech et commerciales inclus.'},
-              {Ic:Activity,t:'Indice de maturité',d:'Score sur 100 selon 4 dimensions opérationnelles.'},
-              {Ic:ShieldAlert,t:'Risque client',d:'Chiffre d\'affaires exposé au churn quantifié.'},
-              {Ic:Sparkles,t:'Potentiel',d:'Simulation d\'externalisation et ROI estimé.'},
+              {Ic:DollarSign, t:'Coût réel', d:'Tous les coûts cachés des équipes tech et commerciales inclus.'},
+              {Ic:Activity, t:'Maturité', d:'Score sur 100 selon 4 dimensions opérationnelles.'},
+              {Ic:ShieldAlert, t:'Risque', d:"Chiffre d'affaires exposé au churn quantifié."},
+              {Ic:Sparkles, t:'Potentiel', d:"Simulation d'externalisation et ROI estimé."},
             ].map((it,i)=>(
-              <div key={i} style={{padding:'28px 24px',borderRight:i<3?`1px solid ${c.rule}`:'none'}}>
+              <div key={i} style={{padding:'28px 24px', borderRight:i<3?`1px solid ${c.rule}`:'none'}}>
                 <it.Ic size={22} color={c.accent} sw={1.5}/>
-                <div style={{fontFamily:F.d,fontSize:20,fontWeight:700,marginTop:14,marginBottom:8}}>{it.t}</div>
-                <div style={{fontFamily:F.s,fontSize:13,lineHeight:1.5,color:c.muted}}>{it.d}</div>
+                <div style={{fontFamily:F.d, fontSize:20, fontWeight:700, marginTop:14, marginBottom:8}}>{it.t}</div>
+                <div style={{fontFamily:F.s, fontSize:13, lineHeight:1.5, color:c.muted}}>{it.d}</div>
               </div>
             ))}
           </div>
@@ -338,49 +518,52 @@
       </W>;
 
       // FORMULAIRE
-      if(stage==='form') return <W stage={stage} step={step}>
-        <div style={{paddingTop:40}}>
-          <div style={{height:3,background:c.paperDeep,borderRadius:3,overflow:'hidden'}}>
-            <div style={{height:'100%',width:`${pct}%`,background:c.accent,transition:'width 0.4s ease'}}/>
+      if(stage==='form') return <W stage={stage} step={step} totalSteps={STEPS.length}>
+        <div style={{paddingTop:40, maxWidth:820, margin:'0 auto'}}>
+          <div style={{height:3, background:c.paperDeep, borderRadius:3, overflow:'hidden'}}>
+            <div style={{height:'100%', width:`${pct}%`, background:c.accent, transition:'width 0.4s ease'}}/>
           </div>
-          <div style={{display:'flex',justifyContent:'space-between',marginTop:10,
-                      fontFamily:F.s,fontSize:10,fontWeight:700,color:c.muted,letterSpacing:'0.12em',textTransform:'uppercase'}}>
+          <div style={{display:'flex', justifyContent:'space-between', marginTop:10, fontFamily:F.s, fontSize:10, fontWeight:700, color:c.muted, letterSpacing:'0.12em', textTransform:'uppercase'}}>
             {STEPS.map((s,i)=><span key={i} style={{color:i<=step?c.ink:c.muted}}>{s.num}</span>)}
           </div>
         </div>
-        <section style={{marginTop:64,maxWidth:760}}>
-          <div style={{fontFamily:F.s,fontSize:11,fontWeight:700,color:c.accent,letterSpacing:'0.2em',textTransform:'uppercase',marginBottom:14}}>Section {cs.num} sur 05</div>
-          <h2 style={{fontFamily:F.d,fontSize:52,fontWeight:800,margin:0,letterSpacing:'-0.025em',lineHeight:1,color:c.ink}}>{cs.title}</h2>
-          <p style={{fontFamily:F.s,fontSize:16,lineHeight:1.55,color:c.inkSoft,marginTop:16,maxWidth:540}}>{cs.desc}</p>
-          <div style={{height:1,background:c.rule,margin:'40px 0'}}/>
-          <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(280px,1fr))',gap:'0 32px'}}>
-            {cs.fields.map(f=><Field key={f.k} label={f.label} hint={f.hint} suffix={f.sfx} value={data[f.k]} onChange={upd(f.k)}/>)}
+        <section style={{marginTop:56, maxWidth:820, margin:'56px auto 0'}}>
+          <div style={{fontFamily:F.s, fontSize:11, fontWeight:700, color:c.accent, letterSpacing:'0.2em', textTransform:'uppercase', marginBottom:14}}>
+            Étape {cs.num} sur 0{STEPS.length}
           </div>
-          <div style={{display:'flex',justifyContent:'space-between',marginTop:48,paddingTop:28,borderTop:`1px solid ${c.rule}`}}>
-            <Btn secondary onClick={()=>step===0?setStage('landing'):setStep(s=>s-1)}><ChevronLeft size={16}/> Précédent</Btn>
+          <h2 style={{fontFamily:F.d, fontSize:48, fontWeight:800, margin:0, letterSpacing:'-0.025em', lineHeight:1, color:c.ink}}>{cs.title}</h2>
+          <p style={{fontFamily:F.s, fontSize:16, lineHeight:1.55, color:c.inkSoft, marginTop:14, maxWidth:560}}>{cs.desc}</p>
+          <div style={{height:1, background:c.rule, margin:'36px 0 40px'}}/>
+          {cs.fields.map(f => (
+            <FormField key={f.k} field={f} value={data[f.k]} onChange={upd(f.k)}/>
+          ))}
+          <div style={{display:'flex', justifyContent:'space-between', marginTop:40, paddingTop:28, borderTop:`1px solid ${c.rule}`}}>
+            <Btn secondary onClick={()=>step===0?setStage('landing'):setStep(s=>s-1)}>
+              <ChevronLeft size={16}/> Précédent
+            </Btn>
             <Btn onClick={()=>step===STEPS.length-1?setStage('lead'):setStep(s=>s+1)}>
-              {step===STEPS.length-1?'Générer mon rapport':'Continuer'} <ArrowRight size={16}/>
+              {step===STEPS.length-1 ? 'Générer mon rapport' : 'Continuer'} <ArrowRight size={16}/>
             </Btn>
           </div>
         </section>
       </W>;
 
       // LEAD CAPTURE
-      if(stage==='lead') return <W stage={stage} step={step}>
-        <section style={{paddingTop:72,maxWidth:760}}>
-          <div style={{fontFamily:F.s,fontSize:11,fontWeight:700,color:c.accent,letterSpacing:'0.2em',textTransform:'uppercase',marginBottom:14}}>Restitution</div>
-          <h2 style={{fontFamily:F.d,fontSize:46,fontWeight:800,margin:0,letterSpacing:'-0.025em',lineHeight:1.05}}>Votre rapport est prêt.</h2>
-          <p style={{fontFamily:F.s,fontSize:17,lineHeight:1.55,color:c.inkSoft,marginTop:20,maxWidth:540}}>Renseignez vos coordonnées pour accéder au rapport exécutif complet.</p>
-          <div style={{marginTop:40,padding:36,background:c.cream,border:`1px solid ${c.rule}`,borderRadius:10}}>
-            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'0 24px'}}>
-              <Field type="text" label="Nom et prénom" hint="Votre prénom et nom de famille" value={lead.name} onChange={updLead('name')}/>
-              <Field type="text" label="Société" hint="Nom de votre entreprise" value={lead.company} onChange={updLead('company')}/>
-              <Field type="email" label="Email professionnel" hint="Votre adresse email de contact" value={lead.email} onChange={updLead('email')}/>
-              <Field type="tel" label="Téléphone" hint="Optionnel — pour vous recontacter" value={lead.phone} onChange={updLead('phone')}/>
+      if(stage==='lead') return <W stage={stage} step={step} totalSteps={STEPS.length}>
+        <section style={{paddingTop:72, maxWidth:760, margin:'0 auto'}}>
+          <div style={{fontFamily:F.s, fontSize:11, fontWeight:700, color:c.accent, letterSpacing:'0.2em', textTransform:'uppercase', marginBottom:14}}>Restitution</div>
+          <h2 style={{fontFamily:F.d, fontSize:46, fontWeight:800, margin:0, letterSpacing:'-0.025em', lineHeight:1.05}}>Votre rapport est prêt.</h2>
+          <p style={{fontFamily:F.s, fontSize:17, lineHeight:1.55, color:c.inkSoft, marginTop:20, maxWidth:540}}>Renseignez vos coordonnées pour accéder au rapport exécutif complet.</p>
+          <div style={{marginTop:40, padding:36, background:c.cream, border:`1px solid ${c.rule}`, borderRadius:10}}>
+            <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:'0 24px'}}>
+              <TextInput label="Nom et prénom" value={lead.name} onChange={updLead('name')}/>
+              <TextInput label="Société" value={lead.company} onChange={updLead('company')}/>
+              <TextInput type="email" label="Email professionnel" value={lead.email} onChange={updLead('email')}/>
+              <TextInput type="tel" label="Téléphone" hint="Optionnel" value={lead.phone} onChange={updLead('phone')}/>
             </div>
-            <div style={{fontFamily:F.s,fontSize:10,color:c.muted,marginTop:8,lineHeight:1.6}}>Données confidentielles. Aucune communication sans votre accord explicite.</div>
+            <div style={{fontFamily:F.s, fontSize:10, color:c.muted, marginTop:8, lineHeight:1.6}}>Données confidentielles. Aucune communication sans votre accord explicite.</div>
           </div>
-          <div style={{display:'flex',justifyContent:'space-between',marginTop:32}}>
+          <div style={{display:'flex', justifyContent:'space-between', marginTop:32}}>
             <Btn secondary onClick={()=>setStage('form')}><ChevronLeft size={16}/> Modifier</Btn>
             <Btn disabled={!ok} onClick={()=>setStage('results')}>Accéder au rapport <ArrowRight size={16}/></Btn>
           </div>
@@ -388,102 +571,106 @@
       </W>;
 
       // RÉSULTATS
-      const rdr=[
-        {dim:'Performance',score:Math.round(res.scores.performance),bench:65},
-        {dim:'Satisfaction',score:Math.round(res.scores.satisfaction),bench:70},
-        {dim:'Productivité',score:Math.round(res.scores.productivity),bench:60},
-        {dim:'Financier',score:Math.round(res.scores.financial),bench:62},
+      const rdr = [
+        {dim:'Performance', score:Math.round(res.scores.performance), bench:65},
+        {dim:'Satisfaction', score:Math.round(res.scores.satisfaction), bench:70},
+        {dim:'Productivité', score:Math.round(res.scores.productivity), bench:60},
+        {dim:'Financier', score:Math.round(res.scores.financial), bench:62},
       ];
-      const costD=[
-        {n:'Masse salariale',v:data.agents*data.agentCost,col:c.ink},
-        {n:'Outils',v:data.toolsCost,col:c.inkSoft},
-        {n:'Management',v:data.managersCost,col:c.muted},
-        {n:'Coût Tech caché',v:res.hTech,col:c.coral},
-        {n:'Coût Commercial caché',v:res.hComm,col:c.amber},
-        {n:'Répétitif',v:res.hRep,col:'#7E8B96'},
-        {n:'Escalades',v:res.hEsc,col:'#7C1F11'},
+      const costD = [
+        {n:'Masse salariale', v:res.normalized.agents*res.normalized.agentCost, col:c.ink},
+        {n:'Outils', v:res.normalized.toolsCost, col:c.inkSoft},
+        {n:'Management', v:res.normalized.managersCost, col:c.muted},
+        {n:'Coût Tech caché', v:res.hTech, col:c.coral},
+        {n:'Coût Commercial caché', v:res.hComm, col:c.amber},
+        {n:'Répétitif', v:res.hRep, col:'#7E8B96'},
+        {n:'Escalades', v:res.hEsc, col:'#7C1F11'},
       ];
 
-      return <W stage={stage} step={step}>
+      return <W stage={stage} step={step} totalSteps={STEPS.length}>
         <section style={{paddingTop:56}}>
-          <div style={{display:'grid',gridTemplateColumns:'1.4fr 1fr',gap:56,alignItems:'start',marginBottom:60}}>
+          <div style={{display:'grid', gridTemplateColumns:'1.4fr 1fr', gap:56, alignItems:'start', marginBottom:60}}>
             <div>
-              <div style={{fontFamily:F.s,fontSize:11,fontWeight:700,color:c.accent,letterSpacing:'0.2em',textTransform:'uppercase',marginBottom:14}}>
+              <div style={{fontFamily:F.s, fontSize:11, fontWeight:700, color:c.accent, letterSpacing:'0.2em', textTransform:'uppercase', marginBottom:14}}>
                 Rapport — {lead.company||'Votre organisation'}
               </div>
-              <h1 style={{fontFamily:F.d,fontSize:'clamp(36px,5vw,60px)',fontWeight:800,margin:0,letterSpacing:'-0.03em',lineHeight:1}}>
-                Indice de maturité<br/><span style={{fontStyle:'italic',color:res.catColor}}>{res.cat}</span>
+              <h1 style={{fontFamily:F.d, fontSize:'clamp(36px,5vw,60px)', fontWeight:800, margin:0, letterSpacing:'-0.03em', lineHeight:1}}>
+                Indice de maturité<br/><span style={{fontStyle:'italic', color:res.catColor}}>{res.cat}</span>
               </h1>
-              <p style={{fontFamily:F.s,fontSize:16,lineHeight:1.55,color:c.inkSoft,marginTop:20,maxWidth:520}}>
+              <p style={{fontFamily:F.s, fontSize:16, lineHeight:1.55, color:c.inkSoft, marginTop:20, maxWidth:520}}>
                 {res.catDesc} L'audit révèle <strong style={{color:c.ink}}>{fmt(res.totalH)}€</strong> de coûts cachés mensuels et un potentiel de <strong style={{color:c.accent}}>{fmt(res.savings)}€</strong> d'économies annuelles.
               </p>
-              <div style={{display:'flex',gap:12,marginTop:28,flexWrap:'wrap'}}>
+              <div style={{display:'flex', gap:12, marginTop:28, flexWrap:'wrap'}}>
                 <Btn onClick={()=>window.print()}><Download size={14}/> Télécharger PDF</Btn>
                 <Btn secondary onClick={()=>{setStage('landing');setStep(0);}}>Refaire l'audit</Btn>
               </div>
             </div>
-            <div style={{border:`1px solid ${c.rule}`,borderRadius:10,padding:36,background:c.cream}}>
-              <div style={{fontFamily:F.s,fontSize:10,fontWeight:600,letterSpacing:'0.15em',color:c.muted,textTransform:'uppercase',marginBottom:10}}>Score global</div>
-              <div style={{display:'flex',alignItems:'baseline',gap:6}}>
-                <div style={{fontFamily:F.d,fontSize:120,fontWeight:800,lineHeight:0.9,color:c.ink,letterSpacing:'-0.04em'}}>{res.scores.global}</div>
-                <div style={{fontFamily:F.d,fontSize:32,color:c.muted,fontStyle:'italic'}}>/100</div>
+            <div style={{border:`1px solid ${c.rule}`, borderRadius:10, padding:36, background:c.cream}}>
+              <div style={{fontFamily:F.s, fontSize:10, fontWeight:600, letterSpacing:'0.15em', color:c.muted, textTransform:'uppercase', marginBottom:10}}>Score global</div>
+              <div style={{display:'flex', alignItems:'baseline', gap:6}}>
+                <div style={{fontFamily:F.d, fontSize:120, fontWeight:800, lineHeight:0.9, color:c.ink, letterSpacing:'-0.04em'}}>{res.scores.global}</div>
+                <div style={{fontFamily:F.d, fontSize:32, color:c.muted, fontStyle:'italic'}}>/100</div>
               </div>
-              <div style={{marginTop:18,height:6,background:c.paperDeep,borderRadius:6,overflow:'hidden'}}>
-                <div style={{height:'100%',width:`${res.scores.global}%`,background:res.catColor,transition:'width 1.2s ease'}}/>
+              <div style={{marginTop:18, height:6, background:c.paperDeep, borderRadius:6, overflow:'hidden'}}>
+                <div style={{height:'100%', width:`${res.scores.global}%`, background:res.catColor, transition:'width 1.2s ease'}}/>
               </div>
-              <div style={{display:'flex',justifyContent:'space-between',marginTop:8,fontFamily:F.s,fontSize:9,fontWeight:600,color:c.muted,letterSpacing:'0.08em'}}>
+              <div style={{display:'flex', justifyContent:'space-between', marginTop:8, fontFamily:F.s, fontSize:9, fontWeight:600, color:c.muted, letterSpacing:'0.08em'}}>
                 <span>Critique</span><span>Faible</span><span>Correct</span><span>Performant</span><span>Excellence</span>
               </div>
             </div>
           </div>
 
           <Rule label="Synthèse exécutive" num="01"/>
-          <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:16}}>
+          <div style={{display:'grid', gridTemplateColumns:'repeat(4, 1fr)', gap:16}}>
             <Card label="Coût réel mensuel" value={`${Math.round(res.totalR/1000)}k€`} sub={`dont ${Math.round(res.totalH/res.totalR*100)}% de coûts cachés`} accent={c.coral} icon={DollarSign}/>
             <Card label="Coût par ticket" value={`${fmt(res.cpt)}€`} sub={res.cpt>25?'Au-dessus du benchmark':'Dans la norme sectorielle'} accent={res.cpt>25?c.coral:c.accent} icon={Hash}/>
             <Card label="Risque de churn" value={`${res.churn.toFixed(1)}%`} sub={`${res.atRisk} clients exposés`} accent={res.churn>15?c.coral:res.churn>7?c.amber:c.accent} icon={AlertTriangle}/>
             <Card label="CA exposé" value={`${Math.round(res.revAtRisk/1000)}k€`} sub="Revenus à risque sur 12 mois" accent={c.coral} icon={TrendingDown}/>
           </div>
 
+          <div style={{marginTop:24, padding:'16px 20px', background:c.paperDeep, borderRadius:8, fontFamily:F.s, fontSize:12, color:c.inkSoft, lineHeight:1.6}}>
+            <strong>Données financières estimées</strong> à partir des moyennes du secteur B2B hospitality (coût agent chargé : 3 500€/mois, outils : 80€/agent, CAC : 400€, LTV : 3 000€). Pour un audit personnalisé avec vos chiffres exacts, contactez-nous.
+          </div>
+
           <Rule label="Cartographie de la maturité" num="02"/>
-          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:24}}>
-            <div style={{border:`1px solid ${c.rule}`,borderRadius:10,padding:28,background:c.cream}}>
-              <div style={{fontFamily:F.d,fontSize:20,fontWeight:700,marginBottom:4}}>Votre position vs benchmark</div>
+          <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:24}}>
+            <div style={{border:`1px solid ${c.rule}`, borderRadius:10, padding:28, background:c.cream}}>
+              <div style={{fontFamily:F.d, fontSize:20, fontWeight:700, marginBottom:4}}>Votre position vs benchmark</div>
               <ResponsiveContainer width="100%" height={280}>
                 <RadarChart data={rdr}>
                   <PolarGrid stroke={c.rule}/>
-                  <PolarAngleAxis dataKey="dim" tick={{fontFamily:F.s,fontSize:12,fill:c.ink,fontWeight:500}}/>
-                  <PolarRadiusAxis tick={{fontSize:9,fill:c.muted}} stroke={c.rule} domain={[0,100]}/>
+                  <PolarAngleAxis dataKey="dim" tick={{fontFamily:F.s, fontSize:12, fill:c.ink, fontWeight:500}}/>
+                  <PolarRadiusAxis tick={{fontSize:9, fill:c.muted}} stroke={c.rule} domain={[0,100]}/>
                   <Radar name="Benchmark" dataKey="bench" stroke={c.muted} fill={c.muted} fillOpacity={0.15} strokeDasharray="3 3"/>
                   <Radar name="Votre score" dataKey="score" stroke={c.accent} fill={c.cyan} fillOpacity={0.35} strokeWidth={2}/>
-                  <Tooltip contentStyle={{fontFamily:F.s,fontSize:12}}/>
+                  <Tooltip contentStyle={{fontFamily:F.s, fontSize:12}}/>
                 </RadarChart>
               </ResponsiveContainer>
-              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'4px 12px',marginTop:12}}>
-                {rdr.map(r=>(
-                  <div key={r.dim} style={{display:'flex',justifyContent:'space-between',padding:'8px 0',borderTop:`1px solid ${c.rule}`}}>
-                    <span style={{fontFamily:F.s,fontSize:12,color:c.inkSoft}}>{r.dim}</span>
-                    <span style={{fontFamily:F.s,fontSize:12,fontWeight:700,color:r.score>=r.bench?c.accent:c.coral}}>{r.score} {r.score>=r.bench?'↑':'↓'} {r.bench}</span>
+              <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:'4px 12px', marginTop:12}}>
+                {rdr.map(r => (
+                  <div key={r.dim} style={{display:'flex', justifyContent:'space-between', padding:'8px 0', borderTop:`1px solid ${c.rule}`}}>
+                    <span style={{fontFamily:F.s, fontSize:12, color:c.inkSoft}}>{r.dim}</span>
+                    <span style={{fontFamily:F.s, fontSize:12, fontWeight:700, color:r.score>=r.bench?c.accent:c.coral}}>{r.score} {r.score>=r.bench?'↑':'↓'} {r.bench}</span>
                   </div>
                 ))}
               </div>
             </div>
-            <div style={{border:`1px solid ${c.rule}`,borderRadius:10,padding:28,background:c.cream}}>
-              <div style={{fontFamily:F.d,fontSize:20,fontWeight:700,marginBottom:4}}>Décomposition du coût réel</div>
+            <div style={{border:`1px solid ${c.rule}`, borderRadius:10, padding:28, background:c.cream}}>
+              <div style={{fontFamily:F.d, fontSize:20, fontWeight:700, marginBottom:4}}>Décomposition du coût réel</div>
               <ResponsiveContainer width="100%" height={200}>
                 <PieChart>
-                  <Pie data={costD.map(d=>({...d,name:d.n,value:d.v}))} cx="50%" cy="50%" innerRadius={50} outerRadius={85} paddingAngle={2} dataKey="value">
-                    {costD.map((d,i)=><Cell key={i} fill={d.col}/>)}
+                  <Pie data={costD.map(d=>({...d, name:d.n, value:d.v}))} cx="50%" cy="50%" innerRadius={50} outerRadius={85} paddingAngle={2} dataKey="value">
+                    {costD.map((d,i) => <Cell key={i} fill={d.col}/>)}
                   </Pie>
-                  <Tooltip formatter={v=>`${fmt(v)}€`} contentStyle={{fontFamily:F.s,fontSize:12}}/>
+                  <Tooltip formatter={v=>`${fmt(v)}€`} contentStyle={{fontFamily:F.s, fontSize:12}}/>
                 </PieChart>
               </ResponsiveContainer>
-              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'3px 8px',marginTop:8}}>
-                {costD.map(d=>(
-                  <div key={d.n} style={{display:'flex',alignItems:'center',gap:8,fontFamily:F.s,fontSize:11,color:c.inkSoft}}>
-                    <span style={{width:10,height:10,background:d.col,borderRadius:2,flexShrink:0}}/>
+              <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:'3px 8px', marginTop:8}}>
+                {costD.map(d => (
+                  <div key={d.n} style={{display:'flex', alignItems:'center', gap:8, fontFamily:F.s, fontSize:11, color:c.inkSoft}}>
+                    <span style={{width:10, height:10, background:d.col, borderRadius:2, flexShrink:0}}/>
                     <span style={{flex:1}}>{d.n}</span>
-                    <span style={{fontWeight:600,color:c.muted}}>{Math.round(d.v/res.totalR*100)}%</span>
+                    <span style={{fontWeight:600, color:c.muted}}>{Math.round(d.v/res.totalR*100)}%</span>
                   </div>
                 ))}
               </div>
@@ -491,121 +678,121 @@
           </div>
 
           <Rule label="Coûts cachés et inefficacités" num="03"/>
-          <div style={{background:c.ink,color:'#fff',padding:'44px 48px',borderRadius:10,position:'relative',overflow:'hidden'}}>
-            <div style={{position:'absolute',top:-60,right:-30,opacity:0.05}}><img src={IZZY_LOGO} alt="" style={{width:400}}/></div>
+          <div style={{background:c.ink, color:'#fff', padding:'44px 48px', borderRadius:10, position:'relative', overflow:'hidden'}}>
+            <div style={{position:'absolute', top:-60, right:-30, opacity:0.05}}><img src={IZZY_LOGO} alt="" style={{width:400}}/></div>
             <div style={{position:'relative'}}>
-              <div style={{fontFamily:F.s,fontSize:10,fontWeight:700,letterSpacing:'0.2em',color:c.cyan,textTransform:'uppercase'}}>L'iceberg du support</div>
-              <div style={{fontFamily:F.d,fontSize:30,fontWeight:700,marginTop:12,maxWidth:700}}>
-                Pour chaque euro visible, <span style={{fontStyle:'italic',color:c.cyan}}>{(res.totalH/Math.max(1,res.direct)).toFixed(2)}€</span> sont absorbés par d'autres équipes.
+              <div style={{fontFamily:F.s, fontSize:10, fontWeight:700, letterSpacing:'0.2em', color:c.cyan, textTransform:'uppercase'}}>L'iceberg du support</div>
+              <div style={{fontFamily:F.d, fontSize:30, fontWeight:700, marginTop:12, maxWidth:700}}>
+                Pour chaque euro visible, <span style={{fontStyle:'italic', color:c.cyan}}>{(res.totalH/Math.max(1,res.direct)).toFixed(2)}€</span> sont absorbés par d'autres équipes.
               </div>
-              <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:0,marginTop:36}}>
+              <div style={{display:'grid', gridTemplateColumns:'repeat(4, 1fr)', gap:0, marginTop:36}}>
                 {[
-                  {l:'Tech absorbé',v:res.hTech,d:`${data.techHours}h × 65€`},
-                  {l:'Commercial',v:res.hComm,d:`${data.commercialHours}h × 55€`},
-                  {l:'Répétitif',v:res.hRep,d:`${data.repetitiveHours}h × 45€`},
-                  {l:'Escalades',v:res.hEsc,d:`${Math.round(data.escalationRate/100*data.tickets)} esc. × 12€`},
-                ].map((s,i)=>(
-                  <div key={i} style={{paddingRight:24,paddingLeft:i>0?24:0,borderRight:i<3?'1px solid rgba(255,255,255,0.12)':'none'}}>
-                    <div style={{fontFamily:F.s,fontSize:10,fontWeight:600,opacity:0.6,letterSpacing:'0.12em',textTransform:'uppercase'}}>{s.l}</div>
-                    <div style={{fontFamily:F.d,fontSize:30,fontWeight:700,marginTop:8,letterSpacing:'-0.02em'}}>{fmt(s.v)}€</div>
-                    <div style={{fontFamily:F.s,fontSize:10,color:c.cyan,marginTop:4,fontWeight:500}}>{s.d}</div>
+                  {l:'Tech absorbé', v:res.hTech, d:`${res.normalized.techHours}h × 65€`},
+                  {l:'Commercial', v:res.hComm, d:`${res.normalized.commercialHours}h × 55€`},
+                  {l:'Répétitif', v:res.hRep, d:`${res.normalized.repetitiveHours}h × 45€`},
+                  {l:'Escalades', v:res.hEsc, d:`${Math.round(res.normalized.escalationRate/100*res.normalized.tickets)} esc. × 12€`},
+                ].map((s,i) => (
+                  <div key={i} style={{paddingRight:24, paddingLeft:i>0?24:0, borderRight:i<3?'1px solid rgba(255,255,255,0.12)':'none'}}>
+                    <div style={{fontFamily:F.s, fontSize:10, fontWeight:600, opacity:0.6, letterSpacing:'0.12em', textTransform:'uppercase'}}>{s.l}</div>
+                    <div style={{fontFamily:F.d, fontSize:30, fontWeight:700, marginTop:8, letterSpacing:'-0.02em'}}>{fmt(s.v)}€</div>
+                    <div style={{fontFamily:F.s, fontSize:10, color:c.cyan, marginTop:4, fontWeight:500}}>{s.d}</div>
                   </div>
                 ))}
               </div>
-              <div style={{marginTop:36,paddingTop:24,borderTop:'1px solid rgba(255,255,255,0.15)',display:'flex',alignItems:'center',justifyContent:'space-between',flexWrap:'wrap',gap:16}}>
+              <div style={{marginTop:36, paddingTop:24, borderTop:'1px solid rgba(255,255,255,0.15)', display:'flex', alignItems:'center', justifyContent:'space-between', flexWrap:'wrap', gap:16}}>
                 <div>
-                  <div style={{fontFamily:F.s,fontSize:10,fontWeight:600,opacity:0.6,letterSpacing:'0.15em',textTransform:'uppercase'}}>Perte annuelle des inefficacités</div>
-                  <div style={{fontFamily:F.d,fontSize:52,fontWeight:700,marginTop:6,letterSpacing:'-0.03em',color:c.cyan}}>{fmt(res.wasted)}€</div>
+                  <div style={{fontFamily:F.s, fontSize:10, fontWeight:600, opacity:0.6, letterSpacing:'0.15em', textTransform:'uppercase'}}>Perte annuelle des inefficacités</div>
+                  <div style={{fontFamily:F.d, fontSize:52, fontWeight:700, marginTop:6, letterSpacing:'-0.03em', color:c.cyan}}>{fmt(res.wasted)}€</div>
                 </div>
-                <div style={{maxWidth:360,fontFamily:F.s,fontSize:14,lineHeight:1.5,opacity:0.8}}>Temps brûlé sur des demandes évitables, escalades injustifiées et allers-retours inutiles — chaque année.</div>
+                <div style={{maxWidth:360, fontFamily:F.s, fontSize:14, lineHeight:1.5, opacity:0.8}}>Temps brûlé sur des demandes évitables, escalades injustifiées et allers-retours inutiles — chaque année.</div>
               </div>
             </div>
           </div>
 
           <Rule label="Impact satisfaction client" num="04"/>
-          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:16}}>
-            <Card label="NPS actuel" value={data.nps} icon={Heart} sub={data.nps<30?'Zone de vigilance':data.nps<50?'Acceptable':'Bon'} accent={data.nps<30?c.coral:c.accent}/>
-            <Card label="CSAT" value={`${data.csat}%`} icon={Activity} sub={`${data.csat<75?'En dessous':'Au-dessus'} de la médiane B2B (75%)`} accent={data.csat<75?c.amber:c.accent}/>
-            <Card label="Ratio réclamations" value={`${res.cmpRatio.toFixed(1)}%`} icon={AlertCircle} sub={`${data.complaints} sur ${data.tickets} tickets`} accent={res.cmpRatio>3?c.coral:c.accent}/>
+          <div style={{display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:16}}>
+            <Card label="NPS actuel" value={res.normalized.nps} icon={Heart} sub={res.normalized.nps<30?'Zone de vigilance':res.normalized.nps<50?'Acceptable':'Bon'} accent={res.normalized.nps<30?c.coral:c.accent}/>
+            <Card label="CSAT" value={`${res.normalized.csat}%`} icon={Activity} sub={`${res.normalized.csat<75?'En dessous':'Au-dessus'} de la médiane B2B (75%)`} accent={res.normalized.csat<75?c.amber:c.accent}/>
+            <Card label="Ratio réclamations" value={`${res.cmpRatio.toFixed(1)}%`} icon={AlertCircle} sub={`${res.normalized.complaints} sur ${res.normalized.tickets} tickets`} accent={res.cmpRatio>3?c.coral:c.accent}/>
           </div>
-          <div style={{marginTop:20,padding:'28px 36px',background:c.cream,border:`1px solid ${c.rule}`,borderLeft:`4px solid ${c.coral}`,borderRadius:8}}>
-            <div style={{display:'flex',alignItems:'flex-start',gap:16}}>
-              <ShieldAlert size={26} color={c.coral} sw={1.5} style={{flexShrink:0,marginTop:2}}/>
+          <div style={{marginTop:20, padding:'28px 36px', background:c.cream, border:`1px solid ${c.rule}`, borderLeft:`4px solid ${c.coral}`, borderRadius:8}}>
+            <div style={{display:'flex', alignItems:'flex-start', gap:16}}>
+              <ShieldAlert size={26} color={c.coral} sw={1.5} style={{flexShrink:0, marginTop:2}}/>
               <div>
-                <div style={{fontFamily:F.d,fontSize:20,fontWeight:700}}>{fmt(res.revAtRisk)}€ de chiffre d'affaires exposé</div>
-                <div style={{fontFamily:F.s,fontSize:13,lineHeight:1.55,color:c.inkSoft,marginTop:8,maxWidth:700}}>
-                  Environ <strong>{res.atRisk} clients</strong> ({res.churn.toFixed(1)}% de votre base) sont en zone de churn. À LTV de {fmt(data.ltv)}€, c'est votre risque de revenus récurrents sur 12 mois.
+                <div style={{fontFamily:F.d, fontSize:20, fontWeight:700}}>{fmt(res.revAtRisk)}€ de chiffre d'affaires exposé</div>
+                <div style={{fontFamily:F.s, fontSize:13, lineHeight:1.55, color:c.inkSoft, marginTop:8, maxWidth:700}}>
+                  Environ <strong>{res.atRisk} clients</strong> ({res.churn.toFixed(1)}% de votre base) sont en zone de churn. À LTV estimée de {fmt(res.normalized.ltv)}€, c'est votre risque de revenus récurrents sur 12 mois.
                 </div>
               </div>
             </div>
           </div>
 
           <Rule label="Diagnostic" num="05"/>
-          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:32}}>
+          <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:32}}>
             <div>
-              <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:16}}>
+              <div style={{display:'flex', alignItems:'center', gap:10, marginBottom:16}}>
                 <CheckCircle2 size={20} color={c.accent} sw={1.5}/>
-                <div style={{fontFamily:F.d,fontSize:24,fontWeight:700}}>Forces</div>
+                <div style={{fontFamily:F.d, fontSize:24, fontWeight:700}}>Forces</div>
               </div>
-              {diag.str.map((s,i)=>(
-                <div key={i} style={{padding:'18px 0',borderTop:`1px solid ${c.rule}`}}>
-                  <div style={{fontFamily:F.s,fontSize:14,fontWeight:700,marginBottom:6}}>{s.t}</div>
-                  <div style={{fontFamily:F.s,fontSize:13,lineHeight:1.55,color:c.muted}}>{s.d}</div>
+              {diag.str.map((s,i) => (
+                <div key={i} style={{padding:'18px 0', borderTop:`1px solid ${c.rule}`}}>
+                  <div style={{fontFamily:F.s, fontSize:14, fontWeight:700, marginBottom:6}}>{s.t}</div>
+                  <div style={{fontFamily:F.s, fontSize:13, lineHeight:1.55, color:c.muted}}>{s.d}</div>
                 </div>
               ))}
             </div>
             <div>
-              <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:16}}>
+              <div style={{display:'flex', alignItems:'center', gap:10, marginBottom:16}}>
                 <XCircle size={20} color={c.coral} sw={1.5}/>
-                <div style={{fontFamily:F.d,fontSize:24,fontWeight:700}}>Faiblesses</div>
+                <div style={{fontFamily:F.d, fontSize:24, fontWeight:700}}>Faiblesses</div>
               </div>
-              {diag.wk.map((w,i)=>(
-                <div key={i} style={{padding:'18px 0',borderTop:`1px solid ${c.rule}`}}>
-                  <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:6}}>
-                    <span style={{fontFamily:F.s,fontSize:9,fontWeight:700,padding:'2px 10px',borderRadius:100,background:w.s==='high'?c.coral:c.amber,color:'#fff',letterSpacing:'0.1em',textTransform:'uppercase'}}>{w.s==='high'?'Critique':'Modéré'}</span>
-                    <div style={{fontFamily:F.s,fontSize:14,fontWeight:700}}>{w.t}</div>
+              {diag.wk.map((w,i) => (
+                <div key={i} style={{padding:'18px 0', borderTop:`1px solid ${c.rule}`}}>
+                  <div style={{display:'flex', alignItems:'center', gap:8, marginBottom:6}}>
+                    <span style={{fontFamily:F.s, fontSize:9, fontWeight:700, padding:'2px 10px', borderRadius:100, background:w.s==='high'?c.coral:c.amber, color:'#fff', letterSpacing:'0.1em', textTransform:'uppercase'}}>{w.s==='high'?'Critique':'Modéré'}</span>
+                    <div style={{fontFamily:F.s, fontSize:14, fontWeight:700}}>{w.t}</div>
                   </div>
-                  <div style={{fontFamily:F.s,fontSize:13,lineHeight:1.55,color:c.muted}}>{w.d}</div>
+                  <div style={{fontFamily:F.s, fontSize:13, lineHeight:1.55, color:c.muted}}>{w.d}</div>
                 </div>
               ))}
             </div>
           </div>
 
           <Rule label="Plan d'action priorisé" num="06"/>
-          <div style={{display:'grid',gap:12}}>
-            {diag.rec.map((r,i)=>(
-              <div key={i} style={{display:'grid',gridTemplateColumns:'56px 1fr 200px',gap:20,padding:'22px 24px',background:c.cream,border:`1px solid ${c.rule}`,borderRadius:8,alignItems:'center'}}>
-                <div style={{fontFamily:F.d,fontSize:40,fontWeight:800,color:r.p===1?c.coral:r.p===2?c.amber:c.accent,lineHeight:1,letterSpacing:'-0.03em'}}>{String(i+1).padStart(2,'0')}</div>
+          <div style={{display:'grid', gap:12}}>
+            {diag.rec.map((r,i) => (
+              <div key={i} style={{display:'grid', gridTemplateColumns:'56px 1fr 200px', gap:20, padding:'22px 24px', background:c.cream, border:`1px solid ${c.rule}`, borderRadius:8, alignItems:'center'}}>
+                <div style={{fontFamily:F.d, fontSize:40, fontWeight:800, color:r.p===1?c.coral:r.p===2?c.amber:c.accent, lineHeight:1, letterSpacing:'-0.03em'}}>{String(i+1).padStart(2,'0')}</div>
                 <div>
-                  <span style={{fontFamily:F.s,fontSize:9,fontWeight:700,padding:'2px 10px',borderRadius:100,background:r.p===1?c.coral:r.p===2?c.amber:c.accent,color:'#fff',letterSpacing:'0.1em',textTransform:'uppercase',marginBottom:8,display:'inline-block'}}>Priorité {r.p}</span>
-                  <div style={{fontFamily:F.d,fontSize:17,fontWeight:700,marginBottom:6}}>{r.t}</div>
-                  <div style={{fontFamily:F.s,fontSize:12,lineHeight:1.55,color:c.muted}}>{r.d}</div>
+                  <span style={{fontFamily:F.s, fontSize:9, fontWeight:700, padding:'2px 10px', borderRadius:100, background:r.p===1?c.coral:r.p===2?c.amber:c.accent, color:'#fff', letterSpacing:'0.1em', textTransform:'uppercase', marginBottom:8, display:'inline-block'}}>Priorité {r.p}</span>
+                  <div style={{fontFamily:F.d, fontSize:17, fontWeight:700, marginBottom:6}}>{r.t}</div>
+                  <div style={{fontFamily:F.s, fontSize:12, lineHeight:1.55, color:c.muted}}>{r.d}</div>
                 </div>
-                <div style={{borderLeft:`1px solid ${c.rule}`,paddingLeft:20}}>
-                  <div style={{fontFamily:F.s,fontSize:9,fontWeight:700,color:c.muted,letterSpacing:'0.12em',textTransform:'uppercase',marginBottom:6}}>Impact estimé</div>
-                  <div style={{fontFamily:F.d,fontSize:16,fontWeight:700,color:c.accent,lineHeight:1.3}}>{r.i}</div>
+                <div style={{borderLeft:`1px solid ${c.rule}`, paddingLeft:20}}>
+                  <div style={{fontFamily:F.s, fontSize:9, fontWeight:700, color:c.muted, letterSpacing:'0.12em', textTransform:'uppercase', marginBottom:6}}>Impact estimé</div>
+                  <div style={{fontFamily:F.d, fontSize:16, fontWeight:700, color:c.accent, lineHeight:1.3}}>{r.i}</div>
                 </div>
               </div>
             ))}
           </div>
 
           <Rule label="Simulation d'externalisation" num="07"/>
-          <div style={{background:`linear-gradient(135deg,${c.ink} 0%,${c.navy} 100%)`,color:'#fff',padding:'52px 52px',borderRadius:10,position:'relative',overflow:'hidden'}}>
-            <div style={{position:'absolute',bottom:-60,right:-40,opacity:0.06}}><img src={IZZY_LOGO} alt="" style={{width:380}}/></div>
+          <div style={{background:`linear-gradient(135deg, ${c.ink} 0%, ${c.navy} 100%)`, color:'#fff', padding:'52px', borderRadius:10, position:'relative', overflow:'hidden'}}>
+            <div style={{position:'absolute', bottom:-60, right:-40, opacity:0.06}}><img src={IZZY_LOGO} alt="" style={{width:380}}/></div>
             <div style={{position:'relative'}}>
-              <div style={{fontFamily:F.s,fontSize:10,fontWeight:700,letterSpacing:'0.2em',opacity:0.8,textTransform:'uppercase'}}>Et si votre support était externalisé ?</div>
-              <h3 style={{fontFamily:F.d,fontSize:36,fontWeight:800,margin:'12px 0 18px',letterSpacing:'-0.02em',lineHeight:1.1}}>Le potentiel d'un partenaire spécialisé, <span style={{fontStyle:'italic',color:c.cyan}}>chiffré sur vos données.</span></h3>
-              <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:0,marginTop:40}}>
+              <div style={{fontFamily:F.s, fontSize:10, fontWeight:700, letterSpacing:'0.2em', opacity:0.8, textTransform:'uppercase'}}>Et si votre support était externalisé ?</div>
+              <h3 style={{fontFamily:F.d, fontSize:36, fontWeight:800, margin:'12px 0 18px', letterSpacing:'-0.02em', lineHeight:1.1}}>Le potentiel d'un partenaire spécialisé, <span style={{fontStyle:'italic', color:c.cyan}}>chiffré sur vos données.</span></h3>
+              <div style={{display:'grid', gridTemplateColumns:'repeat(4, 1fr)', gap:0, marginTop:40}}>
                 {[
-                  {l:'Économies annuelles',v:`${Math.round(res.savings/1000)}k€`,d:'Direct + coûts cachés'},
-                  {l:'Temps récupéré',v:`${Math.round(res.recov)}h/mois`,d:'Pour le cœur de métier'},
-                  {l:'ROI estimé',v:`${res.roi}%`,d:'Sur 12 mois'},
-                  {l:'NPS projeté',v:`+14 pts`,d:`${data.nps} → ${res.newNps}`},
-                ].map((s,i)=>(
-                  <div key={i} style={{paddingRight:24,paddingLeft:i>0?24:0,borderRight:i<3?'1px solid rgba(255,255,255,0.12)':'none'}}>
-                    <div style={{fontFamily:F.s,fontSize:10,fontWeight:600,opacity:0.7,letterSpacing:'0.12em',textTransform:'uppercase'}}>{s.l}</div>
-                    <div style={{fontFamily:F.d,fontSize:40,fontWeight:800,marginTop:10,letterSpacing:'-0.025em',lineHeight:1}}>{s.v}</div>
-                    <div style={{fontFamily:F.s,fontSize:11,marginTop:6,opacity:0.75}}>{s.d}</div>
+                  {l:'Économies annuelles', v:`${Math.round(res.savings/1000)}k€`, d:'Direct + coûts cachés'},
+                  {l:'Temps récupéré', v:`${Math.round(res.recov)}h/mois`, d:'Pour le cœur de métier'},
+                  {l:'ROI estimé', v:`${res.roi}%`, d:'Sur 12 mois'},
+                  {l:'NPS projeté', v:`+14 pts`, d:`${res.normalized.nps} → ${res.newNps}`},
+                ].map((s,i) => (
+                  <div key={i} style={{paddingRight:24, paddingLeft:i>0?24:0, borderRight:i<3?'1px solid rgba(255,255,255,0.12)':'none'}}>
+                    <div style={{fontFamily:F.s, fontSize:10, fontWeight:600, opacity:0.7, letterSpacing:'0.12em', textTransform:'uppercase'}}>{s.l}</div>
+                    <div style={{fontFamily:F.d, fontSize:40, fontWeight:800, marginTop:10, letterSpacing:'-0.025em', lineHeight:1}}>{s.v}</div>
+                    <div style={{fontFamily:F.s, fontSize:11, marginTop:6, opacity:0.75}}>{s.d}</div>
                   </div>
                 ))}
               </div>
@@ -613,32 +800,32 @@
           </div>
 
           <Rule label="Rapport de direction" num="08"/>
-          <div style={{background:c.cream,border:`1px solid ${c.rule}`,borderRadius:10,padding:'44px 48px'}}>
-            <div style={{fontFamily:F.s,fontSize:10,fontWeight:700,color:c.muted,letterSpacing:'0.2em',textTransform:'uppercase',marginBottom:8}}>Note confidentielle · Direction Générale</div>
-            <div style={{fontFamily:F.d,fontSize:28,fontWeight:700,letterSpacing:'-0.02em',marginBottom:32}}>Synthèse stratégique — {lead.company||'Votre organisation'}</div>
+          <div style={{background:c.cream, border:`1px solid ${c.rule}`, borderRadius:10, padding:'44px 48px'}}>
+            <div style={{fontFamily:F.s, fontSize:10, fontWeight:700, color:c.muted, letterSpacing:'0.2em', textTransform:'uppercase', marginBottom:8}}>Note confidentielle · Direction Générale</div>
+            <div style={{fontFamily:F.d, fontSize:28, fontWeight:700, letterSpacing:'-0.02em', marginBottom:32}}>Synthèse stratégique — {lead.company||'Votre organisation'}</div>
             {[
-              {title:'Situation actuelle',text:`L'évaluation positionne votre support dans la catégorie « ${res.cat} » avec un score de ${res.scores.global}/100. La structure traite ${data.tickets.toLocaleString('fr-FR')} tickets mensuels pour un coût direct de ${fmt(res.direct)}€, soit ${fmt(res.cpt)}€ par ticket (benchmark sectoriel : 15-25€).`},
-              {title:'Risques identifiés',text:`(1) Les coûts cachés représentent ${fmt(res.totalH)}€/mois — ${Math.round(res.totalH/res.totalR*100)}% du coût total réel. (2) Le risque de churn expose ${fmt(res.revAtRisk)}€ de CA sur 12 mois. (3) ${diag.wk.filter(w=>w.s==='high').length} faiblesse(s) critique(s) requièrent une action immédiate.`},
-              {title:'Opportunités',text:`Potentiel de ${fmt(res.savings)}€/an mobilisable sur 6-12 mois : automatisation (${Math.round(data.repetitiveHours*0.6)}h/mois), refonte L1/L2, récupération de ${Math.round(res.recov)}h/mois pour les équipes tech & commerciales.`},
-              {title:'Recommandation stratégique',text:res.scores.global<50?"Le niveau actuel justifie une action structurante immédiate. Nous recommandons d'évaluer en priorité un partenariat d'externalisation spécialisé hospitality. Le ROI est inférieur à 12 mois.":res.scores.global<75?"Des marges d'optimisation significatives n'imposent pas de rupture organisationnelle. Plan en deux temps : optimisation interne 6 mois, puis benchmark externalisation pour arbitrer.":"La maturité opérationnelle est élevée. Investissement ciblé sur les outils prédictifs et la formation pour transformer le support en avantage concurrentiel durable."},
-            ].map((s,i)=>(
+              {title:'Situation actuelle', text:`L'évaluation positionne votre support dans la catégorie « ${res.cat} » avec un score de ${res.scores.global}/100. La structure traite ${res.normalized.tickets.toLocaleString('fr-FR')} tickets mensuels pour un coût direct estimé à ${fmt(res.direct)}€, soit ${fmt(res.cpt)}€ par ticket (benchmark sectoriel : 15-25€).`},
+              {title:'Risques identifiés', text:`(1) Les coûts cachés représentent ${fmt(res.totalH)}€/mois — ${Math.round(res.totalH/res.totalR*100)}% du coût total réel. (2) Le risque de churn expose ${fmt(res.revAtRisk)}€ de CA sur 12 mois. (3) ${diag.wk.filter(w=>w.s==='high').length} faiblesse(s) critique(s) requièrent une action immédiate.`},
+              {title:'Opportunités', text:`Potentiel de ${fmt(res.savings)}€/an mobilisable sur 6-12 mois : automatisation (${Math.round(res.normalized.repetitiveHours*0.6)}h/mois), refonte L1/L2, récupération de ${Math.round(res.recov)}h/mois pour les équipes tech & commerciales.`},
+              {title:'Recommandation stratégique', text:res.scores.global<50?"Le niveau actuel justifie une action structurante immédiate. Nous recommandons d'évaluer en priorité un partenariat d'externalisation spécialisé hospitality. Le ROI est inférieur à 12 mois.":res.scores.global<75?"Des marges d'optimisation significatives n'imposent pas de rupture organisationnelle. Plan en deux temps : optimisation interne 6 mois, puis benchmark externalisation pour arbitrer.":"La maturité opérationnelle est élevée. Investissement ciblé sur les outils prédictifs et la formation pour transformer le support en avantage concurrentiel durable."},
+            ].map((s,i) => (
               <div key={i} style={{marginBottom:28}}>
-                <div style={{fontFamily:F.s,fontSize:10,fontWeight:700,color:c.accent,letterSpacing:'0.18em',textTransform:'uppercase',marginBottom:8}}>{s.title}</div>
-                <div style={{fontFamily:F.s,fontSize:14,lineHeight:1.7,color:c.inkSoft}}>{s.text}</div>
+                <div style={{fontFamily:F.s, fontSize:10, fontWeight:700, color:c.accent, letterSpacing:'0.18em', textTransform:'uppercase', marginBottom:8}}>{s.title}</div>
+                <div style={{fontFamily:F.s, fontSize:14, lineHeight:1.7, color:c.inkSoft}}>{s.text}</div>
               </div>
             ))}
-            <div style={{padding:'20px 24px',background:c.paper,borderLeft:`3px solid ${c.accent}`,borderRadius:4}}>
-              <div style={{fontFamily:F.s,fontSize:9,fontWeight:700,color:c.accent,letterSpacing:'0.15em',textTransform:'uppercase',marginBottom:6}}>Prochaine étape recommandée</div>
-              <div style={{fontFamily:F.d,fontSize:16,fontWeight:700}}>Atelier de cadrage de 2h pour challenger ces conclusions et arbitrer les priorités avec votre équipe dirigeante.</div>
+            <div style={{padding:'20px 24px', background:c.paper, borderLeft:`3px solid ${c.accent}`, borderRadius:4}}>
+              <div style={{fontFamily:F.s, fontSize:9, fontWeight:700, color:c.accent, letterSpacing:'0.15em', textTransform:'uppercase', marginBottom:6}}>Prochaine étape recommandée</div>
+              <div style={{fontFamily:F.d, fontSize:16, fontWeight:700}}>Atelier de cadrage de 2h pour challenger ces conclusions et arbitrer les priorités avec votre équipe dirigeante.</div>
             </div>
           </div>
 
-          <div style={{marginTop:56,padding:'52px',background:c.ink,color:'#fff',borderRadius:10,textAlign:'center'}}>
-            <div style={{fontFamily:F.s,fontSize:10,fontWeight:700,letterSpacing:'0.25em',opacity:0.6,textTransform:'uppercase'}}>Vous voulez aller plus loin ?</div>
-            <h3 style={{fontFamily:F.d,fontSize:36,fontWeight:800,margin:'14px 0 20px',letterSpacing:'-0.02em',lineHeight:1.1}}>
-              Échangeons sur votre <span style={{fontStyle:'italic',color:c.cyan}}>plan de transformation</span>
+          <div style={{marginTop:56, padding:'52px', background:c.ink, color:'#fff', borderRadius:10, textAlign:'center'}}>
+            <div style={{fontFamily:F.s, fontSize:10, fontWeight:700, letterSpacing:'0.25em', opacity:0.6, textTransform:'uppercase'}}>Vous voulez aller plus loin ?</div>
+            <h3 style={{fontFamily:F.d, fontSize:36, fontWeight:800, margin:'14px 0 20px', letterSpacing:'-0.02em', lineHeight:1.1}}>
+              Échangeons sur votre <span style={{fontStyle:'italic', color:c.cyan}}>plan de transformation</span>
             </h3>
-            <p style={{fontFamily:F.s,fontSize:15,lineHeight:1.55,opacity:0.8,maxWidth:540,margin:'0 auto 28px'}}>
+            <p style={{fontFamily:F.s, fontSize:15, lineHeight:1.55, opacity:0.8, maxWidth:540, margin:'0 auto 28px'}}>
               Un consultant Izzy All reviendra vers vous sous 48h pour présenter le rapport et les leviers d'action prioritaires.
             </p>
             <Btn onClick={()=>window.print()} style={{margin:'0 auto'}}><Download size={16}/> Télécharger le rapport PDF</Btn>
