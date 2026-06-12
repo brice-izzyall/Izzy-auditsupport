@@ -114,25 +114,33 @@
         font-size:10pt;
       }
 
-      .no-print{display:none !important;}
+      /* Cacher tout ce qui est interactif ou non pertinent en PDF */
+      .no-print,
+      button:not(.calendly-btn),
+      header.app-header{
+        display:none !important;
+      }
       .bg-logo{display:none !important;}
 
       /* Layout adapté au format A4 */
-      .hero-grid{grid-template-columns:1fr !important; gap:20px !important;}
+      .page-wrap{padding:0 !important; max-width:100% !important;}
+      .hero-grid{grid-template-columns:1.6fr 1fr !important; gap:20px !important;}
       .stat-grid-4{grid-template-columns:repeat(4,1fr) !important; gap:8px !important;}
       .stat-grid-3{grid-template-columns:repeat(3,1fr) !important; gap:8px !important;}
-      .iceberg-grid{grid-template-columns:repeat(2,1fr) !important;}
-      .ext-grid{grid-template-columns:repeat(2,1fr) !important;}
+      .iceberg-grid{grid-template-columns:repeat(4,1fr) !important;}
+      .ext-grid{grid-template-columns:repeat(4,1fr) !important;}
+      .two-col{grid-template-columns:1fr 1fr !important; gap:18px !important;}
 
-      /* Compacter les sections sombres */
+      /* Tailles de typographie compactées pour A4 */
+      .result-title{font-size:32pt !important;}
+      .score-big{font-size:64pt !important;}
       .dark-section, .gradient-section{
         padding:24px 26px !important;
       }
       .dark-section h3, .gradient-section h3,
       .iceberg-title, .ext-title{font-size:18pt !important;}
 
-      /* Éviter les coupures uniquement sur les PETITS éléments
-         (sans bloquer les grandes sections qui doivent pouvoir se découper) */
+      /* Éviter les coupures uniquement sur les éléments compacts */
       .reco-card,
       .stat-grid-4 > *,
       .stat-grid-3 > *,
@@ -142,13 +150,12 @@
         break-inside:avoid;
       }
 
-      /* Titres : pas de coupure juste après */
       h1, h2, h3, h4{
         page-break-after:avoid;
         break-after:avoid;
       }
 
-      /* Le footer position:fixed (utile en mode standalone, ignoré dans Wix) */
+      /* Footer position:fixed — fonctionne en mode standalone (nouvel onglet) */
       .print-footer{
         display:flex !important;
         position:fixed;
@@ -173,8 +180,7 @@
         text-decoration:none;
       }
 
-      /* Footer INLINE en fin de document — garantit la présence du logo
-         dans le PDF même quand position:fixed ne fonctionne pas (iframe Wix) */
+      /* Footer INLINE en fin de document — garantit la présence du logo en backup */
       .print-footer-inline{
         display:flex !important;
         justify-content:space-between;
@@ -660,12 +666,37 @@
       </div>
     );
 
+    // ── DÉTECTION DU MODE PRINT VIA URL PARAMS ────────────────────
+    // Quand l'audit est embarqué dans Wix, l'impression directe imprime la page Wix entière.
+    // Solution : ouvrir une copie de l'audit dans un nouvel onglet (en dehors de l'iframe Wix),
+    // avec toutes les données passées par l'URL. Puis auto-déclencher l'impression depuis ce
+    // contexte propre. Le PDF résultant n'a plus aucune trace du wrapper Wix.
+    const URL_PARAMS = new URLSearchParams(window.location.search);
+    const IS_PRINT_MODE = URL_PARAMS.get('print') === '1';
+
+    function decodeStateFromUrl() {
+      const data = {...DEF};
+      const lead = {name:'', company:'', email:'', phone:''};
+      for (const [k, v] of URL_PARAMS.entries()) {
+        if (k === 'print') continue;
+        if (k.startsWith('l_')) {
+          lead[k.slice(2)] = decodeURIComponent(v);
+        } else if (k in DEF) {
+          const num = Number(v);
+          data[k] = isNaN(num) ? v : num;
+        }
+      }
+      return {data, lead};
+    }
+
     // ── APP ──────────────────────────────────────────────────────
     function App() {
-      const [stage, setStage] = useState('landing');
+      const restored = useMemo(() => IS_PRINT_MODE ? decodeStateFromUrl() : null, []);
+
+      const [stage, setStage] = useState(IS_PRINT_MODE ? 'results' : 'landing');
       const [step, setStep] = useState(0);
-      const [data, setData] = useState(DEF);
-      const [lead, setLead] = useState({name:'', company:'', email:'', phone:''});
+      const [data, setData] = useState(restored?.data || DEF);
+      const [lead, setLead] = useState(restored?.lead || {name:'', company:'', email:'', phone:''});
 
       const upd = useCallback(k => v => setData(d => ({...d, [k]:v})), []);
       const updLead = useCallback(k => v => setLead(l => ({...l, [k]:v})), []);
@@ -677,10 +708,8 @@
           isFirstRender.current = false;
           return;
         }
-        // 1. Scroller la vue interne de l'iframe vers le haut
         try { window.scrollTo({top:0, behavior:'smooth'}); }
         catch(e) { try { window.scrollTo(0,0); } catch(_){} }
-        // 2. Si embarqué dans une page parente (Wix), demander au parent de scroller vers nous
         try {
           if (window.self !== window.top) {
             document.documentElement.scrollIntoView({behavior:'smooth', block:'start'});
@@ -688,13 +717,36 @@
         } catch(e) {}
       }, [stage, step]);
 
-      // Fonction de lancement de l'impression — focus l'iframe avant pour maximiser la chance que
-      // le navigateur n'imprime que notre contenu et non la page Wix complète
-      const doPrint = useCallback(() => {
-        try { window.focus(); } catch(e) {}
-        setTimeout(() => window.print(), 50);
+      // Auto-déclenchement de l'impression quand on arrive en mode print
+      useEffect(() => {
+        if (!IS_PRINT_MODE) return;
+        // Attendre que recharts ait fini de rendre + que les polices soient chargées
+        const t = setTimeout(() => {
+          try { window.print(); } catch(e) {}
+        }, 1500);
+        return () => clearTimeout(t);
       }, []);
-      const res = useMemo(() => compute(data), [data]);
+
+      // Génération PDF — ouvre l'audit dans un nouvel onglet propre (sans wrapper Wix)
+      // avec toutes les données en URL, puis l'auto-print se déclenche dans cet onglet
+      const doPrint = useCallback(() => {
+        const params = new URLSearchParams();
+        Object.entries(data).forEach(([k, v]) => params.set(k, String(v)));
+        Object.entries(lead).forEach(([k, v]) => {
+          if (v) params.set('l_' + k, encodeURIComponent(v));
+        });
+        params.set('print', '1');
+
+        // Construire l'URL absolue de l'audit (toujours github.io même en iframe Wix)
+        const baseUrl = window.location.protocol + '//' + window.location.host + window.location.pathname;
+        const printUrl = baseUrl + '?' + params.toString();
+
+        // Ouvrir dans un nouvel onglet — sortira automatiquement de l'iframe Wix
+        const newWin = window.open(printUrl, '_blank');
+        if (!newWin) {
+          alert("Pour télécharger le PDF, autorisez les pop-ups pour ce site dans votre navigateur, puis réessayez.");
+        }
+      }, [data, lead]);      const res = useMemo(() => compute(data), [data]);
       const diag = useMemo(() => generateDiag(data, res), [data, res]);
       const cs = STEPS[step];
       const pct = ((step+1)/STEPS.length)*100;
@@ -824,12 +876,12 @@
               <p style={{fontFamily:F.s, fontSize:16, lineHeight:1.55, color:c.inkSoft, marginTop:20, maxWidth:520}}>
                 {res.catDesc} L'audit révèle <strong style={{color:c.ink}}>{fmt(res.totalH)}€</strong> de coûts cachés mensuels et un potentiel de <strong style={{color:c.accent}}>{fmt(res.savings)}€</strong> d'économies annuelles.
               </p>
-              <div style={{display:'flex', gap:12, marginTop:28, flexWrap:'wrap', alignItems:'center'}}>
+              <div className="no-print" style={{display:'flex', gap:12, marginTop:28, flexWrap:'wrap', alignItems:'center'}}>
                 <Btn onClick={doPrint}><Download size={14}/> Générer le PDF</Btn>
                 <Btn secondary onClick={()=>{setStage('landing');setStep(0);}}>Refaire l'audit</Btn>
               </div>
-              <div style={{marginTop:14, fontFamily:F.s, fontSize:12, color:c.muted, lineHeight:1.5, maxWidth:520}}>
-                💡 Dans la fenêtre d'impression qui s'ouvre, choisissez <strong>« Enregistrer en PDF »</strong> comme destination, puis cliquez sur <strong>Enregistrer</strong>.
+              <div className="no-print" style={{marginTop:14, fontFamily:F.s, fontSize:12, color:c.muted, lineHeight:1.5, maxWidth:520}}>
+                💡 Un nouvel onglet va s'ouvrir avec votre rapport et la fenêtre d'impression. Choisissez <strong>« Enregistrer en PDF »</strong> comme destination, et décochez <strong>« En-têtes et pieds de page »</strong> pour un rendu propre.
               </div>
             </div>
             <div style={{border:`1px solid ${c.rule}`, borderRadius:10, padding:36, background:c.cream}}>
