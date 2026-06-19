@@ -280,25 +280,35 @@
 
     // ── DONNÉES PAR DÉFAUT ───────────────────────────────────────
     const DEF = {
-      tickets:1000, clients:300, agents:3,
+      ticketsMin:500, ticketsMax:1500, clients:1250, agents:3,
       frt:8, mttr:48, escalationRate:20,
-      nps:15, csat:70, complaints:12,
+      nps:15, csat:70, complaintsRate:1.5,
       techImpact:60, commercialImpact:40, repetitivePct:40,
     };
 
-    // ── NORMALISATION : converti les réponses simples en données complètes
+    // ── NORMALISATION : convertit les réponses simples en données complètes
     function normalize(d) {
       const agents = d.agents || 3;
+      // Tickets = moyenne entre min et max ; on garde aussi min/max pour le rapport
+      const ticketsMin = d.ticketsMin ?? 500;
+      const ticketsMax = d.ticketsMax ?? 1500;
+      const tickets = Math.round((ticketsMin + ticketsMax) / 2);
+      const clients = d.clients || 1000;
+      // Réclamations : maintenant en % des clients, on convertit en nombre absolu
+      const complaintsRate = d.complaintsRate ?? 1.5;
+      const complaints = Math.max(1, Math.round((complaintsRate / 100) * clients));
       // Heures cachées dérivées du % d'impact et de la base de tickets
       const techHours = d.techImpact || 30;
       const commercialHours = d.commercialImpact || 25;
-      const repetitiveHours = Math.round((d.repetitivePct||30)/100 * (d.tickets||600) * 0.3);
+      const repetitiveHours = Math.round((d.repetitivePct||30)/100 * tickets * 0.3);
       return {
-        tickets:d.tickets||600, clients:d.clients||300, agents, hoursPerAgent:152,
+        tickets, ticketsMin, ticketsMax,
+        clients, agents, hoursPerAgent:152,
         frt:d.frt||8, mttr:d.mttr||48, fcr:55, globalResolution:85,
         exchangesPerTicket:4, escalationRate:d.escalationRate||20,
-        nps:d.nps??15, csat:d.csat??70, complaints:d.complaints||12,
-        negativeReviews:Math.round((d.complaints||12)*0.4),
+        nps:d.nps??15, csat:d.csat??70,
+        complaints, complaintsRate,
+        negativeReviews:Math.round(complaints*0.4),
         techHours, commercialHours, repetitiveHours,
         // Financier auto-calculé (moyennes B2B hospitality France)
         agentCost:3500,
@@ -318,8 +328,9 @@
       const performance=(frtScore+mttrScore+fcrScore+escScore)/4;
       const npsScore  = Math.max(0,Math.min(100,(d.nps+100)/2));
       const csatScore = Math.max(0,Math.min(100,d.csat));
-      const cmpRatio  = d.tickets>0?(d.complaints/d.tickets)*100:0;
-      const cmpScore  = Math.max(0,100-cmpRatio*12);
+      // cmpRatio = % de clients qui se plaignent (au lieu de l'ancien % par ticket)
+      const cmpRatio  = d.complaintsRate ?? 0;
+      const cmpScore  = Math.max(0, 100 - cmpRatio * 14);
       const satisfaction=npsScore*0.4+csatScore*0.4+cmpScore*0.2;
       const agentH    = Math.max(1,d.agents*d.hoursPerAgent);
       const hiddenH   = d.techHours+d.commercialHours+d.repetitiveHours;
@@ -356,22 +367,110 @@
     function generateDiag(d,r) {
       const str=[],wk=[],rec=[];
       const n = r.normalized;
-      if(r.scores.performance>=70) str.push({t:'Performance opérationnelle solide',d:'Vos délais de réponse et de résolution se situent dans les standards du marché.'});
-      if(r.scores.satisfaction>=70) str.push({t:'Satisfaction client préservée',d:`NPS de ${n.nps} et CSAT de ${n.csat}% dans des niveaux acceptables.`});
-      if(r.ltvCac>=3) str.push({t:'Économie unitaire saine',d:`Ratio LTV/CAC estimé de ${r.ltvCac.toFixed(1)} — chaque acquisition génère de la valeur durable.`});
-      if(!str.length) str.push({t:"Démarche d'amélioration engagée",d:"Réaliser cet audit témoigne d'une volonté de progrès. C'est le bon point de départ."});
-      if(n.frt>4) wk.push({t:'Temps de première réponse trop long',d:`${n.frt}h — au-delà du seuil B2B de 4h.`,s:'high'});
-      if(n.mttr>24) wk.push({t:'Temps de résolution excessif',d:`${n.mttr}h pour clore un ticket.`,s:n.mttr>72?'high':'med'});
-      if(n.escalationRate>15) wk.push({t:"Taux d'escalade élevé",d:`${n.escalationRate}% — surcharge des équipes techniques.`,s:n.escalationRate>25?'high':'med'});
-      if(n.nps<30) wk.push({t:'NPS sous-performant',d:`NPS de ${n.nps} — risque de bouche-à-oreille négatif.`,s:n.nps<10?'high':'med'});
-      if(r.totalH>r.direct*0.4) wk.push({t:'Coûts cachés massifs',d:`${fmt(r.totalH)}€/mois absorbés par les équipes hors support.`,s:'high'});
-      if(r.churn>12) wk.push({t:'Risque de churn élevé',d:`${r.atRisk} clients exposés, soit ${fmt(r.revAtRisk)}€.`,s:r.churn>20?'high':'med'});
-      if(n.frt>4) rec.push({p:1,t:'Routage et SLA par criticité',i:'FRT divisé par 2 à 3',d:'Catégoriser dès la création, prioriser par impact business.'});
-      if(r.totalH>r.direct*0.3) rec.push({p:1,t:'Isoler le support des équipes produit',i:`${fmt(r.totalH*0.7)}€/mois récupérés`,d:"Filtre L1 strict, procédure d'escalade rigoureuse."});
-      if(n.repetitiveHours>40) rec.push({p:2,t:'Automatiser les demandes répétitives',i:`${Math.round(n.repetitiveHours*0.6)}h/mois récupérées`,d:'Self-service, chatbot, FAQ contextuelle, statut en temps réel.'});
-      if(r.churn>12) rec.push({p:1,t:'Programme de récupération client proactif',i:`${Math.round(r.atRisk*0.5)} clients sauvegardés`,d:'Identifier les comptes à risque et déclencher un suivi commercial.'});
-      if(r.scores.global<60) rec.push({p:1,t:"Évaluer l'externalisation du support",i:`${fmt(r.savings)}€/an estimés`,d:'Un partenaire spécialisé apporte process matures et scalabilité immédiate.'});
-      if(n.nps<30) rec.push({p:2,t:'Boucle de feedback systématique',i:'+8 à +15 pts NPS',d:'CSAT après chaque clôture, analyse hebdo des verbatim.'});
+
+      // ── FORCES — langage clair et concret ─────────────────────
+      if(r.scores.performance>=70) str.push({
+        t:'Vos délais tiennent la route',
+        d:`Vos clients sont pris en charge en ${n.frt}h et leurs problèmes résolus en ${n.mttr}h en moyenne — c'est dans les standards du marché.`
+      });
+      if(r.scores.satisfaction>=70) str.push({
+        t:'Vos clients sont globalement satisfaits',
+        d:`NPS de ${n.nps} (recommandation) et CSAT de ${n.csat}% (satisfaction post-contact) à des niveaux acceptables.`
+      });
+      if(r.ltvCac>=3) str.push({
+        t:'Votre modèle économique est sain',
+        d:`Chaque euro investi en acquisition rapporte ${r.ltvCac.toFixed(1)}€ sur la durée de vie du client — votre support a de la marge pour s'améliorer sans tuer la rentabilité.`
+      });
+      if(!str.length) str.push({
+        t:"Vous avez décidé d'en avoir le cœur net",
+        d:"Réaliser cet audit est déjà une décision stratégique. C'est le bon moment pour structurer une démarche d'amélioration."
+      });
+
+      // ── FAIBLESSES — langage explicite, comparaisons concrètes ─
+      if(n.frt>4) wk.push({
+        t:"Vos clients attendent trop longtemps une première réponse",
+        d:`En moyenne ${n.frt}h avant qu'un agent leur réponde. Le standard B2B premium est sous 4h. Au-delà, le client a le temps de chercher ailleurs ou de s'énerver.`,
+        s:n.frt>16?'high':'med'
+      });
+      if(n.mttr>24) wk.push({
+        t:"Résoudre un problème prend trop de temps",
+        d:`${n.mttr}h en moyenne entre le premier contact et la clôture définitive. Plus le délai s'allonge, plus le risque de perte du client augmente.`,
+        s:n.mttr>72?'high':'med'
+      });
+      if(n.escalationRate>15) wk.push({
+        t:"Trop de demandes remontent aux équipes techniques",
+        d:`${n.escalationRate}% des tickets nécessitent l'intervention d'experts (dev, IT...). Cela surcharge des équipes qui devraient être focalisées sur le produit.`,
+        s:n.escalationRate>25?'high':'med'
+      });
+      if(n.nps<30) wk.push({
+        t:"Vos clients ne vous recommanderaient pas",
+        d:`NPS de ${n.nps} (sur une échelle de -100 à +100). En dessous de 30, vos clients sont neutres ou critiques — bouche-à-oreille à risque.`,
+        s:n.nps<10?'high':'med'
+      });
+      if(n.csat<70) wk.push({
+        t:"La satisfaction post-contact est insuffisante",
+        d:`CSAT de ${n.csat}% — moins de 70% de vos clients se déclarent satisfaits après contact avec le support. Le standard B2B est de 75% minimum.`,
+        s:n.csat<60?'high':'med'
+      });
+      if(n.complaintsRate>1.5) wk.push({
+        t:"Trop de clients vous expriment formellement un mécontentement",
+        d:`${n.complaintsRate.toFixed(1)}% de vos clients (${fmt(n.complaints)} sur ${fmt(n.clients)}) se plaignent chaque mois. Au-delà de 1,5%, c'est un signal d'alerte fort.`,
+        s:n.complaintsRate>3?'high':'med'
+      });
+      if(r.totalH>r.direct*0.4) wk.push({
+        t:"Votre support coûte bien plus cher que vous ne le pensez",
+        d:`${fmt(r.totalH)}€ par mois sont absorbés par vos équipes techniques et commerciales pour faire du support déguisé — au lieu de leur cœur de métier.`,
+        s:'high'
+      });
+      if(r.churn>12) wk.push({
+        t:"Vous risquez de perdre des clients à cause du support",
+        d:`Environ ${r.atRisk} clients (${r.churn.toFixed(1)}% de votre base) sont en zone de churn — soit ${fmt(r.revAtRisk)}€ de revenus récurrents exposés sur 12 mois.`,
+        s:r.churn>20?'high':'med'
+      });
+
+      // ── RECOMMANDATIONS — formulées comme des actions claires ─
+      if(n.frt>4) rec.push({
+        p:1,
+        t:'Mettre en place un système de priorisation des demandes',
+        i:'Délai de réponse divisé par 2 à 3',
+        d:"Trier dès la réception : urgent vs courant, client stratégique vs lambda. Garantir des SLA différenciés (engagements de délai contractuels)."
+      });
+      if(r.totalH>r.direct*0.3) rec.push({
+        p:1,
+        t:'Cloisonner le support du reste de votre organisation',
+        i:`${fmt(r.totalH*0.7)}€/mois récupérés pour les autres équipes`,
+        d:"Mettre en place un filtre L1 (première ligne) strict avec procédure d'escalade documentée. Vos techniques et commerciaux n'auraient plus à faire du SAV."
+      });
+      if(n.repetitiveHours>40) rec.push({
+        p:2,
+        t:'Automatiser les demandes qui reviennent en boucle',
+        i:`${Math.round(n.repetitiveHours*0.6)}h/mois libérées`,
+        d:"Self-service (centre d'aide), chatbot pour les FAQ, statut de commande en temps réel, mots de passe en autonomie..."
+      });
+      if(r.churn>12) rec.push({
+        p:1,
+        t:'Lancer un programme de rétention proactive',
+        i:`${Math.round(r.atRisk*0.5)} clients potentiellement sauvegardés`,
+        d:'Identifier les comptes à risque via les signaux faibles (silence, baisse usage, plaintes...) et déclencher un contact commercial avant la rupture.'
+      });
+      if(r.scores.global<60) rec.push({
+        p:1,
+        t:"Évaluer l'externalisation à un partenaire spécialisé",
+        i:`${fmt(r.savings)}€/an d'économies estimées`,
+        d:'Un prestataire mature apporte process éprouvés, équipes déjà formées et scalabilité immédiate. ROI souvent inférieur à 12 mois.'
+      });
+      if(n.nps<30 || n.csat<70) rec.push({
+        p:2,
+        t:"Mettre en place une boucle de feedback systématique",
+        i:'Gain estimé de +8 à +15 pts NPS',
+        d:"Envoyer un CSAT après chaque clôture de ticket, analyser chaque semaine les verbatim négatifs, agir sur les irritants récurrents."
+      });
+      if(n.complaintsRate>2) rec.push({
+        p:1,
+        t:"Diagnostiquer la racine des plaintes",
+        i:'Réduction de 40 à 60% des plaintes',
+        d:"Catégoriser les motifs de mécontentement les plus fréquents et traiter les 3 causes majeures à la source — pas en surface."
+      });
       rec.sort((a,b)=>a.p-b.p);
       return {str,wk,rec};
     }
@@ -514,56 +613,85 @@
     const STEPS = [
       {
         title:'Votre équipe', num:'01',
-        desc:"Pour cadrer l'échelle de votre activité support.",
+        desc:"Pour cadrer la taille et la variabilité de votre activité support.",
         fields:[
-          {k:'tickets', type:'cards',
-           label:'Combien de tickets traitez-vous chaque mois ?',
+          {k:'ticketsMin', type:'cards',
+           label:'Combien de demandes recevez-vous au MINIMUM par mois ?',
+           hint:"En période la plus calme (ex. : creux saisonnier). Une « demande » = tout contact entrant : email, appel, chat, ticket…",
            options:[
-             {l:'Moins de 200', v:100},
-             {l:'200 à 500', v:350},
-             {l:'500 à 1 500', v:1000},
-             {l:'1 500 à 5 000', v:3000},
+             {l:'Moins de 100', v:50},
+             {l:'100 à 300', v:200},
+             {l:'300 à 500', v:400},
+             {l:'500 à 1 000', v:750},
+             {l:'1 000 à 2 000', v:1500},
+             {l:'2 000 à 5 000', v:3500},
+             {l:'Plus de 5 000', v:7500},
+           ]},
+          {k:'ticketsMax', type:'cards',
+           label:'Et au MAXIMUM par mois ?',
+           hint:"En période de pic (ex. : lancement produit, saisonnalité, incident technique).",
+           options:[
+             {l:'Moins de 100', v:50},
+             {l:'100 à 300', v:200},
+             {l:'300 à 500', v:400},
+             {l:'500 à 1 000', v:750},
+             {l:'1 000 à 2 000', v:1500},
+             {l:'2 000 à 5 000', v:3500},
              {l:'Plus de 5 000', v:7500},
            ]},
           {k:'clients', type:'cards',
-           label:'Combien de clients actifs avez-vous ?',
+           label:'Combien de clients actifs avez-vous au total ?',
+           hint:"Clients qui interagissent régulièrement avec vos produits ou services.",
            options:[
-             {l:'Moins de 100', v:50},
-             {l:'100 à 500', v:300},
-             {l:'500 à 2 000', v:1200},
-             {l:'2 000 à 10 000', v:5000},
+             {l:'Moins de 500', v:250},
+             {l:'500 à 1 000', v:750},
+             {l:'1 000 à 1 500', v:1250},
+             {l:'1 500 à 2 000', v:1750},
+             {l:'2 000 à 3 000', v:2500},
+             {l:'3 000 à 4 000', v:3500},
+             {l:'4 000 à 5 000', v:4500},
+             {l:'5 000 à 7 500', v:6250},
+             {l:'7 500 à 10 000', v:8750},
              {l:'Plus de 10 000', v:15000},
            ]},
           {k:'agents', type:'stepper',
            label:"Combien d'agents support à temps plein dans votre équipe ?",
-           hint:'En équivalents temps plein dédiés',
+           hint:"En équivalents temps plein (ETP) — un agent à mi-temps compte pour 0,5.",
            min:1, max:50},
         ]
       },
       {
         title:'Vos délais', num:'02',
-        desc:"Rapidité de prise en charge et de résolution des demandes.",
+        desc:"Le temps que vos clients attendent avant d'être pris en charge et de voir leur problème résolu.",
         fields:[
           {k:'frt', type:'cards',
-           label:"En moyenne, combien de temps avant qu'un client reçoive une première réponse ?",
+           label:"Combien de temps avant qu'un client reçoive sa première réponse ?",
+           hint:"Délai entre l'envoi du message par le client et la première réaction humaine de votre équipe. Standard B2B premium : moins de 4h.",
            options:[
              {l:"Moins d'1 heure", v:0.5},
-             {l:'1 à 4 heures', v:2},
-             {l:'4 à 12 heures', v:8},
-             {l:'12 à 24 heures', v:18},
+             {l:'1 à 4 heures', v:2.5},
+             {l:'4 à 8 heures', v:6},
+             {l:'8 à 12 heures', v:10},
+             {l:'12 à 16 heures', v:14},
+             {l:'16 à 24 heures', v:20},
              {l:'Plus de 24 heures', v:36},
            ]},
           {k:'mttr', type:'cards',
-           label:'Combien de temps en moyenne pour clore un ticket ?',
+           label:'Combien de temps pour résoudre totalement une demande ?',
+           hint:"Du premier message jusqu'à la clôture définitive du dossier. Inclut l'attente, les allers-retours, les escalades.",
            options:[
              {l:'Moins de 4 heures', v:2},
-             {l:'4 à 24 heures', v:12},
+             {l:'4 à 8 heures', v:6},
+             {l:'8 à 12 heures', v:10},
+             {l:'12 à 16 heures', v:14},
+             {l:'16 à 24 heures', v:20},
              {l:'1 à 3 jours', v:48},
              {l:'3 à 7 jours', v:120},
              {l:"Plus d'une semaine", v:200},
            ]},
           {k:'escalationRate', type:'cards',
-           label:'Quelle part des tickets remonte vers les équipes techniques (L2/L3) ?',
+           label:'Quelle part de vos demandes doit remonter à une équipe technique ?',
+           hint:"Quand le support de première ligne ne peut pas résoudre et doit faire intervenir des développeurs, IT, ou experts produit.",
            options:[
              {l:'Moins de 10%', v:5},
              {l:'10 à 25%', v:17},
@@ -575,22 +703,22 @@
       },
       {
         title:'Satisfaction client', num:'03',
-        desc:"Comment vos clients vivent l'expérience support.",
+        desc:"La perception et le ressenti de vos clients vis-à-vis du support.",
         fields:[
           {k:'nps', type:'cards',
            label:'Quel est votre NPS approximatif ?',
-           hint:'Net Promoter Score — Indicateur de recommandation',
+           hint:"NPS = Net Promoter Score. Mesure sur une échelle de -100 à +100 si vos clients vous recommanderaient. Au-dessus de 50 = excellent.",
            options:[
-             {l:'Très bas (négatif)', v:-30},
+             {l:'Négatif (clients critiques)', v:-30},
              {l:'Bas (0 à 20)', v:10},
              {l:'Moyen (20 à 50)', v:35},
              {l:'Bon (50 à 70)', v:60},
-             {l:'Excellent (>70)', v:80},
+             {l:'Excellent (plus de 70)', v:80},
              {l:'Je ne mesure pas', v:15},
            ]},
           {k:'csat', type:'cards',
            label:'Quel est votre CSAT moyen ?',
-           hint:'Satisfaction client après résolution',
+           hint:"CSAT = Customer Satisfaction Score. Pourcentage de clients qui se déclarent satisfaits après contact avec le support. Standard B2B : 75% minimum.",
            options:[
              {l:'Moins de 60%', v:50},
              {l:'60 à 75%', v:68},
@@ -598,31 +726,36 @@
              {l:'Plus de 85%', v:90},
              {l:'Je ne mesure pas', v:70},
            ]},
-          {k:'complaints', type:'cards',
-           label:'Combien de réclamations formelles recevez-vous par mois ?',
+          {k:'complaintsRate', type:'cards',
+           label:'Quelle proportion de vos clients exprime un mécontentement formel chaque mois ?',
+           hint:"Mécontentement formel = plainte explicite, demande de remboursement, menace de partir, avis négatif public. À calculer en % du nombre total de clients actifs.",
            options:[
-             {l:'Très peu (0 à 5)', v:3},
-             {l:'Modérément (5 à 20)', v:12},
-             {l:'Beaucoup (20 à 50)', v:35},
-             {l:'Énormément (>50)', v:75},
+             {l:'Quasiment aucun (moins de 0,5%)', v:0.3},
+             {l:'Très peu (0,5 à 1%)', v:0.75},
+             {l:'Modéré (1 à 2%)', v:1.5},
+             {l:'Significatif (2 à 5%)', v:3.5},
+             {l:'Élevé (plus de 5%)', v:7},
+             {l:'Je ne sais pas', v:1.5},
            ]},
         ]
       },
       {
         title:'Impact sur les autres équipes', num:'04',
-        desc:"Le support déborde-t-il sur vos équipes techniques et commerciales ?",
+        desc:"Le support déborde-t-il sur des équipes qui devraient être focalisées ailleurs ?",
         fields:[
           {k:'techImpact', type:'cards',
-           label:'À quelle fréquence vos équipes techniques sont-elles sollicitées sur des demandes support ?',
+           label:'À quelle fréquence vos équipes techniques sont-elles interrompues pour aider le support ?',
+           hint:"Développeurs, IT, équipe produit sollicités pour des questions ou problèmes qui auraient dû être traités par le support directement.",
            options:[
              {l:'Jamais', v:0},
-             {l:'Rarement', v:15},
-             {l:'Régulièrement', v:45},
-             {l:'Souvent', v:90},
-             {l:'En permanence', v:160},
+             {l:'Rarement (quelques fois par mois)', v:15},
+             {l:'Régulièrement (1 à 2 fois par semaine)', v:45},
+             {l:'Souvent (presque tous les jours)', v:90},
+             {l:'En permanence (plusieurs fois par jour)', v:160},
            ]},
           {k:'commercialImpact', type:'cards',
-           label:'Vos équipes commerciales traitent-elles des demandes qui relèvent du support ?',
+           label:'Vos commerciaux traitent-ils des demandes qui relèvent du support ?',
+           hint:"Au lieu de vendre, ils répondent aux questions SAV de leurs comptes clients (statuts, problèmes techniques, mode d'emploi…).",
            options:[
              {l:'Jamais', v:0},
              {l:'Rarement', v:12},
@@ -631,8 +764,8 @@
              {l:'En permanence', v:130},
            ]},
           {k:'repetitivePct', type:'cards',
-           label:'Quelle part de vos tickets sont des demandes répétitives ?',
-           hint:'Mots de passe, statuts de commande, FAQ basique…',
+           label:'Quelle part de vos demandes sont des questions répétitives ?',
+           hint:"Demandes simples qui reviennent en boucle : mots de passe, statuts de commande, FAQ de base, « comment faire X »… Typiquement automatisables.",
            options:[
              {l:'Moins de 20%', v:10},
              {l:'20 à 40%', v:30},
@@ -875,7 +1008,7 @@
             <div style={{display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:8, marginBottom:12}}>
               <PdfCard label="NPS actuel" value={res.normalized.nps} sub={res.normalized.nps<30?'Zone de vigilance':res.normalized.nps<50?'Acceptable':'Bon'} accent={res.normalized.nps<30?c.coral:c.accent}/>
               <PdfCard label="CSAT" value={`${res.normalized.csat}%`} sub={`${res.normalized.csat<75?'En dessous':'Au-dessus'} médiane B2B (75%)`} accent={res.normalized.csat<75?c.amber:c.accent}/>
-              <PdfCard label="Ratio réclamations" value={`${res.cmpRatio.toFixed(1)}%`} sub={`${res.normalized.complaints} sur ${res.normalized.tickets} tickets`} accent={res.cmpRatio>3?c.coral:c.accent}/>
+              <PdfCard label="Ratio réclamations" value={`${res.cmpRatio.toFixed(1)}%`} sub={`${fmt(res.normalized.complaints)} clients sur ${fmt(res.normalized.clients)} mécontents`} accent={res.cmpRatio>2?c.coral:c.accent}/>
             </div>
 
             <div style={{padding:'18px 22px', background:c.cream, border:`1px solid ${c.rule}`, borderLeft:`4px solid ${c.coral}`, borderRadius:6, marginBottom:24}}>
@@ -969,7 +1102,7 @@
                 Synthèse stratégique — {company}
               </div>
               {[
-                {title:'Situation actuelle', text:`L'évaluation positionne votre support dans la catégorie « ${res.cat} » avec un score de ${res.scores.global}/100. La structure traite ${res.normalized.tickets.toLocaleString('fr-FR')} tickets mensuels pour un coût direct estimé à ${fmt(res.direct)}€, soit ${fmt(res.cpt)}€ par ticket (benchmark sectoriel : 15-25€).`},
+                {title:'Situation actuelle', text:`L'évaluation positionne votre support dans la catégorie « ${res.cat} » avec un score de ${res.scores.global}/100. La structure traite entre ${fmt(res.normalized.ticketsMin)} et ${fmt(res.normalized.ticketsMax)} demandes mensuelles pour un coût direct estimé à ${fmt(res.direct)}€, soit ${fmt(res.cpt)}€ par ticket (benchmark sectoriel : 15-25€).`},
                 {title:'Risques identifiés', text:`(1) Coûts cachés : ${fmt(res.totalH)}€/mois — ${Math.round(res.totalH/res.totalR*100)}% du coût total réel. (2) Risque de churn : ${fmt(res.revAtRisk)}€ de CA exposé sur 12 mois. (3) ${diag.wk.filter(w=>w.s==='high').length} faiblesse(s) critique(s) requièrent une action immédiate.`},
                 {title:'Opportunités', text:`Potentiel de ${fmt(res.savings)}€/an mobilisable sur 6-12 mois : automatisation des demandes répétitives, refonte L1/L2, récupération de ${Math.round(res.recov)}h/mois pour les équipes tech & commerciales.`},
                 {title:'Recommandation', text:res.scores.global<50?"Le niveau actuel justifie une action structurante immédiate. Nous recommandons d'évaluer en priorité un partenariat d'externalisation spécialisé. Le ROI est inférieur à 12 mois.":res.scores.global<75?"Des marges d'optimisation significatives n'imposent pas de rupture organisationnelle. Plan en deux temps : optimisation interne 6 mois, puis benchmark externalisation pour arbitrer.":"La maturité est élevée. Investissement ciblé sur outils prédictifs et formation pour transformer le support en avantage concurrentiel durable."},
@@ -1027,10 +1160,12 @@
       if (!el || !window.html2canvas) return null;
       try {
         const canvas = await window.html2canvas(el, {
-          scale: 2,
+          scale: 3,
           backgroundColor: '#FFFFFF',
           logging: false,
           useCORS: true,
+          letterRendering: true,
+          allowTaint: false,
         });
         return canvas.toDataURL('image/png');
       } catch(e) {
@@ -1043,6 +1178,30 @@
       const { jsPDF } = window.jspdf;
       const pdf = new jsPDF({orientation:'portrait', unit:'mm', format:'a4', compress:true});
       const normalized = results.normalized;
+
+      // ── SANITIZATION DES CARACTÈRES UNICODE ─────────────────────
+      // La Helvetica intégrée à jsPDF ne supporte pas certains caractères :
+      // - U+202F narrow no-break space (produit par toLocaleString) → rendu comme "/"
+      // - U+2192 → flèche droite → rendu comme "!' " ou caractère bizarre
+      // - U+2013/2014 en/em dash → mal rendus dans certaines versions
+      // On intercepte toutes les fonctions text/textWithLink/splitTextToSize pour
+      // assainir les entrées avant rendu.
+      const sanitize = s => typeof s !== 'string' ? s : s
+        .replace(/[\u202F\u00A0]/g, ' ')   // espaces insécables → espace normal
+        .replace(/\u2192/g, '->')           // → → ->
+        .replace(/\u2014/g, '—')            // em dash : on garde, supporté en Latin-1
+        .replace(/\u2013/g, '-');           // en dash → tiret simple
+      const cleanArg = x => {
+        if (typeof x === 'string') return sanitize(x);
+        if (Array.isArray(x)) return x.map(v => typeof v === 'string' ? sanitize(v) : v);
+        return x;
+      };
+      const _origText = pdf.text.bind(pdf);
+      pdf.text = function(s, ...a) { return _origText(cleanArg(s), ...a); };
+      const _origSplit = pdf.splitTextToSize.bind(pdf);
+      pdf.splitTextToSize = function(s, w, o) { return _origSplit(cleanArg(s), w, o); };
+      const _origLink = pdf.textWithLink.bind(pdf);
+      pdf.textWithLink = function(s, ...a) { return _origLink(cleanArg(s), ...a); };
 
       // Géométrie
       const W = 210, H = 297, M = 14;
@@ -1057,7 +1216,10 @@
         paper:[244,248,251], navy:[10,31,51], navyDeep:[6,24,42],
       };
       const catColor = hexToRgb(results.catColor);
-      const fmt = n => Math.round(n).toLocaleString('fr-FR');
+      // Formatage numérique manuel — espace ordinaire garanti, jamais U+202F
+      const fmt = n => Math.round(n).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+      // Idem pour les entiers déjà sous forme de nombre
+      const fmtInt = n => n.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
 
       let pageNum = 1;
 
@@ -1278,10 +1440,16 @@
       newPage(); y = M;
       y = drawRule(y, '04', 'Impact satisfaction client');
 
+      // Petit lexique sous la section pour les non-experts
+      setF(7,'italic'); setColor(C.muted);
+      const lex = pdf.splitTextToSize("NPS = à quel point vos clients vous recommanderaient. CSAT = % de clients satisfaits après contact. Mécontentement = % de clients qui se plaignent formellement chaque mois.", CW);
+      pdf.text(lex, M, y);
+      y += lex.length*3.5 + 3;
+
       const satCards = [
         { label:'NPS ACTUEL', value:String(normalized.nps), sub:normalized.nps<30?'Zone de vigilance':normalized.nps<50?'Acceptable':'Bon', color:normalized.nps<30?C.coral:C.accent },
         { label:'CSAT', value:`${normalized.csat}%`, sub:`${normalized.csat<75?'En dessous':'Au-dessus'} de la médiane B2B (75%)`, color:normalized.csat<75?C.amber:C.accent },
-        { label:'RATIO RÉCLAMATIONS', value:`${results.cmpRatio.toFixed(1)}%`, sub:`${normalized.complaints} sur ${normalized.tickets} tickets`, color:results.cmpRatio>3?C.coral:C.accent },
+        { label:'MÉCONTENTEMENT FORMEL', value:`${results.cmpRatio.toFixed(1)}%`, sub:`${fmt(normalized.complaints)} clients sur ${fmt(normalized.clients)} par mois`, color:results.cmpRatio>2?C.coral:C.accent },
       ];
       const satW = (CW - 6)/3;
       satCards.forEach((card, i) => {
@@ -1400,7 +1568,7 @@
         { l:'ÉCONOMIES ANNUELLES', v:`${Math.round(results.savings/1000)}k€`, d:'Direct + coûts cachés' },
         { l:'TEMPS RÉCUPÉRÉ', v:`${Math.round(results.recov)}h/m`, d:'Pour le cœur de métier' },
         { l:'ROI ESTIMÉ', v:`${results.roi}%`, d:'Sur 12 mois' },
-        { l:'NPS PROJETÉ', v:`+14 pts`, d:`${normalized.nps} → ${results.newNps}` },
+        { l:'NPS PROJETÉ', v:`+14 pts`, d:`De ${normalized.nps} vers ${results.newNps}` },
       ];
       const extW = (CW - 14)/4;
       extItems.forEach((it, i) => {
@@ -1430,7 +1598,7 @@
       y += 8;
 
       const execS = [
-        {t:'SITUATION ACTUELLE', d:`L'évaluation positionne votre support dans la catégorie « ${results.cat} » avec un score de ${results.scores.global}/100. La structure traite ${normalized.tickets.toLocaleString('fr-FR')} tickets mensuels pour un coût direct estimé à ${fmt(results.direct)}€, soit ${fmt(results.cpt)}€ par ticket (benchmark sectoriel : 15-25€).`},
+        {t:'SITUATION ACTUELLE', d:`L'évaluation positionne votre support dans la catégorie « ${results.cat} » avec un score de ${results.scores.global}/100. La structure traite entre ${fmt(normalized.ticketsMin)} et ${fmt(normalized.ticketsMax)} demandes mensuelles pour un coût direct estimé à ${fmt(results.direct)}€, soit ${fmt(results.cpt)}€ par ticket (benchmark sectoriel : 15-25€).`},
         {t:'RISQUES IDENTIFIÉS', d:`(1) Les coûts cachés représentent ${fmt(results.totalH)}€/mois — ${Math.round(results.totalH/results.totalR*100)}% du coût total réel. (2) Le risque de churn expose ${fmt(results.revAtRisk)}€ de CA sur 12 mois. (3) ${diag.wk.filter(w=>w.s==='high').length} faiblesse(s) critique(s) requièrent une action immédiate.`},
         {t:'OPPORTUNITÉS', d:`Potentiel de ${fmt(results.savings)}€/an mobilisable sur 6-12 mois : automatisation (${Math.round(normalized.repetitiveHours*0.6)}h/mois), refonte L1/L2, récupération de ${Math.round(results.recov)}h/mois pour les équipes tech & commerciales.`},
         {t:'RECOMMANDATION STRATÉGIQUE', d:results.scores.global<50?"Le niveau actuel justifie une action structurante immédiate. Nous recommandons d'évaluer en priorité un partenariat d'externalisation spécialisé hospitality. Le ROI est inférieur à 12 mois.":results.scores.global<75?"Des marges d'optimisation significatives n'imposent pas de rupture organisationnelle. Plan en deux temps : optimisation interne 6 mois, puis benchmark externalisation pour arbitrer.":"La maturité opérationnelle est élevée. Investissement ciblé sur les outils prédictifs et la formation pour transformer le support en avantage concurrentiel durable."},
@@ -1787,10 +1955,13 @@
           </div>
 
           <Rule label="Impact satisfaction client" num="04"/>
+          <div style={{fontFamily:F.s, fontSize:12, color:c.muted, marginBottom:14, fontStyle:'italic', lineHeight:1.5}}>
+            NPS = à quel point vos clients vous recommanderaient (échelle -100 à +100). CSAT = % de clients satisfaits après contact. Ratio de mécontentement = % de clients qui se plaignent formellement chaque mois.
+          </div>
           <div className="stat-grid-3 keep-together" style={{display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:16}}>
             <Card label="NPS actuel" value={res.normalized.nps} icon={Heart} sub={res.normalized.nps<30?'Zone de vigilance':res.normalized.nps<50?'Acceptable':'Bon'} accent={res.normalized.nps<30?c.coral:c.accent}/>
             <Card label="CSAT" value={`${res.normalized.csat}%`} icon={Activity} sub={`${res.normalized.csat<75?'En dessous':'Au-dessus'} de la médiane B2B (75%)`} accent={res.normalized.csat<75?c.amber:c.accent}/>
-            <Card label="Ratio réclamations" value={`${res.cmpRatio.toFixed(1)}%`} icon={AlertCircle} sub={`${res.normalized.complaints} sur ${res.normalized.tickets} tickets`} accent={res.cmpRatio>3?c.coral:c.accent}/>
+            <Card label="Mécontentement formel" value={`${res.cmpRatio.toFixed(1)}%`} icon={AlertCircle} sub={`${fmt(res.normalized.complaints)} clients sur ${fmt(res.normalized.clients)} se plaignent chaque mois`} accent={res.cmpRatio>2?c.coral:c.accent}/>
           </div>
           <div className="keep-together" style={{marginTop:20, padding:'28px 36px', background:c.cream, border:`1px solid ${c.rule}`, borderLeft:`4px solid ${c.coral}`, borderRadius:8}}>
             <div style={{display:'flex', alignItems:'flex-start', gap:16}}>
@@ -1881,7 +2052,7 @@
             <div style={{fontFamily:F.s, fontSize:10, fontWeight:700, color:c.muted, letterSpacing:'0.2em', textTransform:'uppercase', marginBottom:8}}>Note confidentielle · Direction Générale</div>
             <div className="exec-report-title" style={{fontFamily:F.d, fontSize:28, fontWeight:700, letterSpacing:'-0.02em', marginBottom:32}}>Synthèse stratégique — {lead.company||'Votre organisation'}</div>
             {[
-              {title:'Situation actuelle', text:`L'évaluation positionne votre support dans la catégorie « ${res.cat} » avec un score de ${res.scores.global}/100. La structure traite ${res.normalized.tickets.toLocaleString('fr-FR')} tickets mensuels pour un coût direct estimé à ${fmt(res.direct)}€, soit ${fmt(res.cpt)}€ par ticket (benchmark sectoriel : 15-25€).`},
+              {title:'Situation actuelle', text:`L'évaluation positionne votre support dans la catégorie « ${res.cat} » avec un score de ${res.scores.global}/100. La structure traite entre ${fmt(res.normalized.ticketsMin)} et ${fmt(res.normalized.ticketsMax)} demandes mensuelles pour un coût direct estimé à ${fmt(res.direct)}€, soit ${fmt(res.cpt)}€ par ticket (benchmark sectoriel : 15-25€).`},
               {title:'Risques identifiés', text:`(1) Les coûts cachés représentent ${fmt(res.totalH)}€/mois — ${Math.round(res.totalH/res.totalR*100)}% du coût total réel. (2) Le risque de churn expose ${fmt(res.revAtRisk)}€ de CA sur 12 mois. (3) ${diag.wk.filter(w=>w.s==='high').length} faiblesse(s) critique(s) requièrent une action immédiate.`},
               {title:'Opportunités', text:`Potentiel de ${fmt(res.savings)}€/an mobilisable sur 6-12 mois : automatisation (${Math.round(res.normalized.repetitiveHours*0.6)}h/mois), refonte L1/L2, récupération de ${Math.round(res.recov)}h/mois pour les équipes tech & commerciales.`},
               {title:'Recommandation stratégique', text:res.scores.global<50?"Le niveau actuel justifie une action structurante immédiate. Nous recommandons d'évaluer en priorité un partenariat d'externalisation spécialisé hospitality. Le ROI est inférieur à 12 mois.":res.scores.global<75?"Des marges d'optimisation significatives n'imposent pas de rupture organisationnelle. Plan en deux temps : optimisation interne 6 mois, puis benchmark externalisation pour arbitrer.":"La maturité opérationnelle est élevée. Investissement ciblé sur les outils prédictifs et la formation pour transformer le support en avantage concurrentiel durable."},
