@@ -1346,11 +1346,12 @@
           source: 'Audit Maturité Support — Izzy All',
         };
         try {
-          await fetch('https://hook.eu1.make.com/pc37r8hyr1yqj44f84dikmuarvsg6nf4', {
+          // Envoi via un proxy public pour contourner les restrictions CORS de l'iframe Wix
+          // et garantir que Make reçoit du JSON correctement parsé (pas du texte brut)
+          await fetch('https://api.allorigins.win/raw?url=' + encodeURIComponent('https://hook.eu1.make.com/pc37r8hyr1yqj44f84dikmuarvsg6nf4'), {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify(payload),
-            mode: 'no-cors', // nécessaire depuis une iframe cross-origin
           });
         } catch(e) {
           // Ne pas bloquer l'utilisateur si le webhook échoue
