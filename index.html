@@ -102,6 +102,10 @@
       margin:14mm 12mm 16mm 12mm;
     }
 
+    /* Mode capture PDF : cache les éléments interactifs pendant html2canvas */
+    body.pdf-capturing .no-print { display: none !important; }
+    body.pdf-capturing #pdf-source { padding-top: 0 !important; }
+
     @media print{
       *,*::before,*::after{
         -webkit-print-color-adjust:exact !important;
@@ -1155,505 +1159,144 @@
       return m ? [parseInt(m[1],16), parseInt(m[2],16), parseInt(m[3],16)] : [0,0,0];
     }
 
-    async function captureNode(selector) {
-      const el = document.querySelector(selector);
-      if (!el || !window.html2canvas) return null;
+    // ── GÉNÉRATION PDF PAR CAPTURE D'ÉCRAN DOM ──────────────────
+    // Capture le rapport tel qu'il est rendu à l'écran (fidélité visuelle 100%),
+    // le découpe intelligemment en pages A4 en cherchant des zones blanches
+    // pour éviter de couper au milieu d'une carte, puis dessine un footer
+    // programmatique avec lien Calendly cliquable sur chaque page.
+
+    async function generatePDF({lead, logoBase64}) {
+      const { jsPDF } = window.jspdf;
+      const pdf = new jsPDF({orientation:'portrait', unit:'mm', format:'a4', compress:true});
+
+      // Géométrie A4 (mm)
+      const W_MM = 210, H_MM = 297, M_MM = 14;
+      const CW_MM = W_MM - 2*M_MM;            // 182mm de largeur utile
+      const FOOTER_RESERVED_MM = 14;          // espace réservé pour le footer
+      const TOP_MARGIN_MM = M_MM;
+      const PAGE_CONTENT_H_MM = H_MM - TOP_MARGIN_MM - FOOTER_RESERVED_MM;
+
+      let pageNum = 1;
+
+      // Footer programmatique sur chaque page : logo + brand + lien Calendly cliquable + n° page
+      function drawFooter() {
+        const fy = H_MM - 8;
+        pdf.setDrawColor(205, 217, 227);
+        pdf.setLineWidth(0.2);
+        pdf.line(M_MM, fy-4, W_MM-M_MM, fy-4);
+        try { pdf.addImage(logoBase64, 'PNG', M_MM, fy-2.5, 5, 5); } catch(e) {}
+        pdf.setFont('helvetica', 'bold'); pdf.setFontSize(7);
+        pdf.setTextColor(95, 115, 136);
+        pdf.text('Izzy All — Audit Support Client', M_MM+6.5, fy+0.5);
+        pdf.setFont('helvetica', 'normal');
+        pdf.text('Réservez votre échange :', W_MM-M_MM-65, fy+0.5);
+        pdf.setFont('helvetica', 'bold'); pdf.setTextColor(45, 122, 139);
+        pdf.textWithLink('calendly.com/commercial-izzysales/30min', W_MM-M_MM-43, fy+0.5,
+          {url:'https://calendly.com/commercial-izzysales/30min'});
+        pdf.setFont('helvetica', 'normal'); pdf.setTextColor(95, 115, 136);
+        pdf.text(String(pageNum), W_MM-M_MM+1, fy+4, {align:'right'});
+      }
+
+      // Recherche d'un bon point de coupe : préférer une ligne blanche dans une fenêtre
+      // de ±60px autour de la position idéale, sinon couper où on était
+      function findBestCut(canvas, idealY, windowPx = 80) {
+        const canvasH = canvas.height;
+        const canvasW = canvas.width;
+        if (idealY >= canvasH) return canvasH;
+        const ctx = canvas.getContext('2d');
+        const start = Math.max(0, idealY - windowPx);
+        const end = Math.min(canvasH, idealY + windowPx);
+        let bestY = idealY;
+        let bestWhiteRatio = 0;
+        // Scanner toutes les 3 lignes pour la perf
+        for (let y = end; y >= start; y -= 3) {
+          let data;
+          try { data = ctx.getImageData(0, y, canvasW, 1).data; } catch(e) { continue; }
+          let whitePixels = 0;
+          for (let i = 0; i < canvasW; i++) {
+            const r = data[i*4], g = data[i*4+1], b = data[i*4+2];
+            if (r > 240 && g > 240 && b > 240) whitePixels++;
+          }
+          const ratio = whitePixels / canvasW;
+          // On prend le premier (le plus bas) qui dépasse 95% de blanc → max économie de pages
+          if (ratio > bestWhiteRatio) {
+            bestWhiteRatio = ratio;
+            bestY = y;
+          }
+        }
+        return bestWhiteRatio > 0.95 ? bestY : idealY;
+      }
+
+      // 1) Trouver la source
+      const source = document.getElementById('pdf-source');
+      if (!source) throw new Error('Source PDF introuvable');
+
+      // 2) Activer le mode capture (cache les boutons no-print, supprime le padding-top)
+      //    + forcer une largeur desktop pour garantir le layout grille même sur mobile
+      document.body.classList.add('pdf-capturing');
+      const origWidth = source.style.width;
+      const origMaxWidth = source.style.maxWidth;
+      source.style.width = '1180px';
+      source.style.maxWidth = '1180px';
+
+      // Attendre que le reflow se fasse (2 frames + petit délai)
+      await new Promise(r => requestAnimationFrame(r));
+      await new Promise(r => requestAnimationFrame(r));
+      await new Promise(r => setTimeout(r, 200));
+
+      let canvas;
       try {
-        const canvas = await window.html2canvas(el, {
-          scale: 3,
+        canvas = await window.html2canvas(source, {
+          scale: 2,
           backgroundColor: '#FFFFFF',
           logging: false,
           useCORS: true,
           letterRendering: true,
-          allowTaint: false,
+          windowWidth: 1200,
         });
-        return canvas.toDataURL('image/png');
-      } catch(e) {
-        console.error('Capture failed:', e);
-        return null;
-      }
-    }
-
-    async function generatePDF({data, lead, results, diag, logoBase64}) {
-      const { jsPDF } = window.jspdf;
-      const pdf = new jsPDF({orientation:'portrait', unit:'mm', format:'a4', compress:true});
-      const normalized = results.normalized;
-
-      // ── SANITIZATION DES CARACTÈRES UNICODE ─────────────────────
-      // La Helvetica intégrée à jsPDF ne supporte pas certains caractères :
-      // - U+202F narrow no-break space (produit par toLocaleString) → rendu comme "/"
-      // - U+2192 → flèche droite → rendu comme "!' " ou caractère bizarre
-      // - U+2013/2014 en/em dash → mal rendus dans certaines versions
-      // On intercepte toutes les fonctions text/textWithLink/splitTextToSize pour
-      // assainir les entrées avant rendu.
-      const sanitize = s => typeof s !== 'string' ? s : s
-        .replace(/[\u202F\u00A0]/g, ' ')   // espaces insécables → espace normal
-        .replace(/\u2192/g, '->')           // → → ->
-        .replace(/\u2014/g, '—')            // em dash : on garde, supporté en Latin-1
-        .replace(/\u2013/g, '-');           // en dash → tiret simple
-      const cleanArg = x => {
-        if (typeof x === 'string') return sanitize(x);
-        if (Array.isArray(x)) return x.map(v => typeof v === 'string' ? sanitize(v) : v);
-        return x;
-      };
-      const _origText = pdf.text.bind(pdf);
-      pdf.text = function(s, ...a) { return _origText(cleanArg(s), ...a); };
-      const _origSplit = pdf.splitTextToSize.bind(pdf);
-      pdf.splitTextToSize = function(s, w, o) { return _origSplit(cleanArg(s), w, o); };
-      const _origLink = pdf.textWithLink.bind(pdf);
-      pdf.textWithLink = function(s, ...a) { return _origLink(cleanArg(s), ...a); };
-
-      // Géométrie
-      const W = 210, H = 297, M = 14;
-      const CW = W - 2*M;
-      const CONTENT_BOTTOM = H - 18; // 18mm réservé pour le footer
-
-      // Couleurs (RGB)
-      const C = {
-        ink:[10,31,51], inkSoft:[30,53,80], muted:[95,115,136],
-        rule:[205,217,227], accent:[45,122,139], cyan:[168,220,236],
-        amber:[184,134,46], coral:[184,91,74], cream:[255,255,255],
-        paper:[244,248,251], navy:[10,31,51], navyDeep:[6,24,42],
-      };
-      const catColor = hexToRgb(results.catColor);
-      // Formatage numérique manuel — espace ordinaire garanti, jamais U+202F
-      const fmt = n => Math.round(n).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
-      // Idem pour les entiers déjà sous forme de nombre
-      const fmtInt = n => n.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
-
-      let pageNum = 1;
-
-      // Helpers
-      const setColor = rgb => pdf.setTextColor(rgb[0],rgb[1],rgb[2]);
-      const setFill = rgb => pdf.setFillColor(rgb[0],rgb[1],rgb[2]);
-      const setDraw = rgb => pdf.setDrawColor(rgb[0],rgb[1],rgb[2]);
-      const setF = (size, weight='normal') => { pdf.setFont('helvetica', weight); pdf.setFontSize(size); };
-
-      function drawFooter() {
-        const fy = H - 12;
-        setDraw(C.rule); pdf.setLineWidth(0.2);
-        pdf.line(M, fy-3, W-M, fy-3);
-        pdf.addImage(logoBase64, 'PNG', M, fy-1, 5, 5);
-        setF(7,'bold'); setColor(C.muted);
-        pdf.text('Izzy All — Audit Support Client', M+6.5, fy+2);
-        setF(7); setColor(C.muted);
-        pdf.text('Réservez votre échange :', W-M-65, fy+2);
-        setF(7,'bold'); setColor(C.accent);
-        pdf.textWithLink('calendly.com/commercial-izzysales/30min', W-M-43, fy+2, {url:'https://calendly.com/commercial-izzysales/30min'});
-        setF(7); setColor(C.muted);
-        pdf.text(`${pageNum}`, W-M+1, fy+5, {align:'right'});
+      } finally {
+        // Toujours restaurer même en cas d'erreur
+        document.body.classList.remove('pdf-capturing');
+        source.style.width = origWidth;
+        source.style.maxWidth = origMaxWidth;
       }
 
-      function newPage() {
+      // 3) Découper et placer dans le PDF
+      const pxPerMm = canvas.width / CW_MM;
+      const idealSlicePxH = PAGE_CONTENT_H_MM * pxPerMm;
+
+      let yStart = 0;
+      let isFirstPage = true;
+      while (yStart < canvas.height) {
+        if (!isFirstPage) {
+          pdf.addPage();
+          pageNum++;
+        }
+        isFirstPage = false;
+
+        const idealEnd = Math.min(canvas.height, yStart + idealSlicePxH);
+        const actualEnd = idealEnd < canvas.height ? findBestCut(canvas, idealEnd) : canvas.height;
+        const sliceH = actualEnd - yStart;
+
+        // Créer le canvas tronqué pour cette page
+        const slice = document.createElement('canvas');
+        slice.width = canvas.width;
+        slice.height = sliceH;
+        const sctx = slice.getContext('2d');
+        sctx.fillStyle = '#FFFFFF';
+        sctx.fillRect(0, 0, slice.width, slice.height);
+        sctx.drawImage(canvas, 0, -yStart);
+
+        const sliceData = slice.toDataURL('image/jpeg', 0.93);
+        const sliceHmm = sliceH / pxPerMm;
+
+        pdf.addImage(sliceData, 'JPEG', M_MM, TOP_MARGIN_MM, CW_MM, sliceHmm);
         drawFooter();
-        pdf.addPage();
-        pageNum++;
+
+        yStart = actualEnd;
       }
 
-      function ensureSpace(y, needed) {
-        if (y + needed > CONTENT_BOTTOM) { newPage(); return M; }
-        return y;
-      }
-
-      function drawRule(y, num, label) {
-        setF(8,'bold'); setColor(C.muted);
-        const t = `${num} — ${label.toUpperCase()}`;
-        pdf.text(t, M, y);
-        const tw = pdf.getTextWidth(t);
-        setDraw(C.rule); pdf.setLineWidth(0.2);
-        pdf.line(M+tw+4, y-1, W-M, y-1);
-        return y + 8;
-      }
-
-      function drawStatCard(x, y, w, h, card) {
-        setDraw(C.rule); setFill(C.cream); pdf.setLineWidth(0.2);
-        pdf.roundedRect(x, y, w, h, 1.5, 1.5, 'FD');
-        setFill(card.color);
-        pdf.rect(x, y, 0.9, h, 'F');
-        setF(6,'bold'); setColor(C.muted);
-        pdf.text(card.label, x+4, y+6);
-        setF(15,'bold'); setColor(C.ink);
-        pdf.text(card.value, x+4, y+16);
-        setF(7); setColor(C.muted);
-        pdf.text(pdf.splitTextToSize(card.sub, w-7), x+4, y+21);
-      }
-
-      // ═══════════════ PAGE 1 ═══════════════
-      // Logo + brand top
-      pdf.addImage(logoBase64, 'PNG', M, M, 9, 9);
-      setF(13,'bold'); setColor(C.ink);
-      pdf.text('Izzy All', M+11, M+4.5);
-      setF(6,'bold'); setColor(C.muted);
-      pdf.text('AUDIT SUPPORT CLIENT', M+11, M+8);
-      setF(7); setColor(C.muted);
-      pdf.text(new Date().toLocaleDateString('fr-FR', {day:'2-digit', month:'long', year:'numeric'}).toUpperCase(), W-M, M+6, {align:'right'});
-
-      let y = M + 13;
-      setDraw(C.rule); pdf.setLineWidth(0.3); pdf.line(M, y, W-M, y);
-      y += 12;
-
-      setF(8,'bold'); setColor(C.accent);
-      pdf.text(`RAPPORT — ${(lead.company||'VOTRE ORGANISATION').toUpperCase()}`, M, y);
-      y += 10;
-
-      // Title bloc
-      setF(26,'bold'); setColor(C.ink);
-      pdf.text('Indice de maturité', M, y);
-      y += 9;
-      setF(26,'bolditalic'); setColor(catColor);
-      pdf.text(results.cat, M, y);
-      y += 12;
-
-      // Description
-      setF(10); setColor(C.inkSoft);
-      const descText = `${results.catDesc} L'audit révèle ${fmt(results.totalH)}€ de coûts cachés mensuels et un potentiel de ${fmt(results.savings)}€ d'économies annuelles.`;
-      const descLines = pdf.splitTextToSize(descText, CW*0.60);
-      pdf.text(descLines, M, y);
-
-      // Score box (positionné à droite, aligné avec le titre)
-      const sbX = M + CW*0.62;
-      const sbY = M + 25;
-      const sbW = CW*0.38;
-      const sbH = 48;
-      setDraw(C.rule); setFill(C.cream); pdf.setLineWidth(0.3);
-      pdf.roundedRect(sbX, sbY, sbW, sbH, 2, 2, 'FD');
-      setF(6,'bold'); setColor(C.muted);
-      pdf.text('SCORE GLOBAL', sbX+5, sbY+7);
-      setF(42,'bold'); setColor(C.ink);
-      pdf.text(String(results.scores.global), sbX+5, sbY+27);
-      setF(13,'italic'); setColor(C.muted);
-      const scoreW = pdf.getTextWidth(String(results.scores.global));
-      setF(42,'bold'); const realScoreW = pdf.getTextWidth(String(results.scores.global));
-      setF(13,'italic');
-      pdf.text('/100', sbX+5+realScoreW+2, sbY+27);
-      // Barre
-      const barX = sbX+5, barY = sbY+33, barW = sbW-10;
-      setFill(C.paper); pdf.rect(barX, barY, barW, 1.8, 'F');
-      setFill(catColor); pdf.rect(barX, barY, barW*(results.scores.global/100), 1.8, 'F');
-      setF(5.5,'bold'); setColor(C.muted);
-      ['Critique','Faible','Correct','Performant','Excellence'].forEach((lbl,i) => {
-        const xp = barX + (barW/4)*i;
-        pdf.text(lbl, xp, barY+5, {align: i===0?'left':i===4?'right':'center'});
-      });
-
-      // Avancer y au plus bas entre la description et la score box
-      y = Math.max(y + descLines.length*4, sbY + sbH) + 12;
-
-      // 01 — Synthèse exécutive
-      y = drawRule(y, '01', 'Synthèse exécutive');
-      const synthCards = [
-        { label:'COÛT RÉEL MENSUEL', value:`${Math.round(results.totalR/1000)}k€`, sub:`${Math.round(results.totalH/results.totalR*100)}% de coûts cachés`, color:C.coral },
-        { label:'COÛT PAR TICKET', value:`${fmt(results.cpt)}€`, sub:results.cpt>25?'Au-dessus du benchmark':'Dans la norme sectorielle', color:results.cpt>25?C.coral:C.accent },
-        { label:'RISQUE DE CHURN', value:`${results.churn.toFixed(1)}%`, sub:`${results.atRisk} clients exposés`, color:results.churn>15?C.coral:results.churn>7?C.amber:C.accent },
-        { label:'CA EXPOSÉ', value:`${Math.round(results.revAtRisk/1000)}k€`, sub:'Revenus à risque sur 12 mois', color:C.coral },
-      ];
-      const synthW = (CW - 9)/4;
-      synthCards.forEach((card, i) => {
-        drawStatCard(M + i*(synthW+3), y, synthW, 28, card);
-      });
-      y += 32;
-
-      // Disclaimer
-      setFill(C.paper); pdf.roundedRect(M, y, CW, 14, 1, 1, 'F');
-      setF(7); setColor(C.inkSoft);
-      pdf.text(pdf.splitTextToSize("Données financières estimées à partir des moyennes du secteur B2B hospitality. Pour un audit personnalisé avec vos chiffres exacts, contactez-nous via Calendly.", CW-8), M+4, y+5);
-      y += 18;
-
-      // ═══════════════ PAGE 2 — Cartographie + Iceberg ═══════════════
-      newPage(); y = M;
-      y = drawRule(y, '02', 'Cartographie de la maturité');
-
-      // Capture des graphiques recharts
-      const radarImg = await captureNode('#radar-capture');
-      const pieImg = await captureNode('#pie-capture');
-
-      const chartW = (CW - 5)/2;
-      const chartH = 64;
-
-      // Card radar
-      setDraw(C.rule); setFill(C.cream); pdf.setLineWidth(0.2);
-      pdf.roundedRect(M, y, chartW, chartH, 1.5, 1.5, 'FD');
-      setF(10,'bold'); setColor(C.ink);
-      pdf.text('Position vs benchmark', M+4, y+6);
-      if (radarImg) {
-        pdf.addImage(radarImg, 'PNG', M+2, y+8, chartW-4, chartH-12);
-      }
-
-      // Card pie
-      setDraw(C.rule); setFill(C.cream);
-      pdf.roundedRect(M+chartW+5, y, chartW, chartH, 1.5, 1.5, 'FD');
-      setF(10,'bold'); setColor(C.ink);
-      pdf.text('Décomposition du coût réel', M+chartW+9, y+6);
-      if (pieImg) {
-        pdf.addImage(pieImg, 'PNG', M+chartW+7, y+8, chartW-4, chartH-12);
-      }
-      y += chartH + 8;
-
-      // Iceberg
-      y = drawRule(y, '03', 'Coûts cachés et inefficacités');
-      const icebergH = 78;
-      setFill(C.navy);
-      pdf.roundedRect(M, y, CW, icebergH, 2, 2, 'F');
-      let iy = y + 9;
-      setF(7,'bold'); setColor(C.cyan);
-      pdf.text("L'ICEBERG DU SUPPORT", M+7, iy);
-      iy += 8;
-      setF(15,'bold'); setColor(C.cream);
-      const ratio = (results.totalH/Math.max(1, results.direct)).toFixed(2);
-      const icebTitle = pdf.splitTextToSize(`Pour chaque euro visible, ${ratio}€ sont absorbés par d'autres équipes.`, CW-20);
-      pdf.text(icebTitle, M+7, iy);
-      iy += icebTitle.length*7;
-
-      const icebItems = [
-        { l:'TECH ABSORBÉ', v:results.hTech, d:`${normalized.techHours}h × 65€` },
-        { l:'COMMERCIAL', v:results.hComm, d:`${normalized.commercialHours}h × 55€` },
-        { l:'RÉPÉTITIF', v:results.hRep, d:`${normalized.repetitiveHours}h × 45€` },
-        { l:'ESCALADES', v:results.hEsc, d:`~${Math.round(normalized.escalationRate/100*normalized.tickets)} × 12€` },
-      ];
-      const itW = (CW - 14)/4;
-      iy += 4;
-      icebItems.forEach((it, i) => {
-        const ix = M + 7 + i*itW;
-        setF(6,'bold'); setColor(C.cyan);
-        pdf.text(it.l, ix, iy);
-        setF(15,'bold'); setColor(C.cream);
-        pdf.text(`${fmt(it.v)}€`, ix, iy+7);
-        setF(6); setColor(C.cyan);
-        pdf.text(it.d, ix, iy+11);
-        if (i < 3) {
-          setDraw([60,80,105]); pdf.setLineWidth(0.15);
-          pdf.line(ix+itW-2, iy-3, ix+itW-2, iy+14);
-        }
-      });
-      iy += 18;
-      setDraw([60,80,105]); pdf.setLineWidth(0.15);
-      pdf.line(M+7, iy-3, M+CW-7, iy-3);
-      setF(6,'bold'); setColor(C.cyan);
-      pdf.text('PERTE ANNUELLE DES INEFFICACITÉS', M+7, iy+2);
-      setF(20,'bold'); setColor(C.cyan);
-      pdf.text(`${fmt(results.wasted)}€`, M+7, iy+12);
-      setF(8); setColor(C.cream);
-      pdf.text(pdf.splitTextToSize('Temps brûlé sur des demandes évitables, escalades injustifiées et allers-retours inutiles — chaque année.', 95), M+70, iy+10);
-      y += icebergH + 8;
-
-      // ═══════════════ PAGE 3 — Satisfaction + Diagnostic ═══════════════
-      newPage(); y = M;
-      y = drawRule(y, '04', 'Impact satisfaction client');
-
-      // Petit lexique sous la section pour les non-experts
-      setF(7,'italic'); setColor(C.muted);
-      const lex = pdf.splitTextToSize("NPS = à quel point vos clients vous recommanderaient. CSAT = % de clients satisfaits après contact. Mécontentement = % de clients qui se plaignent formellement chaque mois.", CW);
-      pdf.text(lex, M, y);
-      y += lex.length*3.5 + 3;
-
-      const satCards = [
-        { label:'NPS ACTUEL', value:String(normalized.nps), sub:normalized.nps<30?'Zone de vigilance':normalized.nps<50?'Acceptable':'Bon', color:normalized.nps<30?C.coral:C.accent },
-        { label:'CSAT', value:`${normalized.csat}%`, sub:`${normalized.csat<75?'En dessous':'Au-dessus'} de la médiane B2B (75%)`, color:normalized.csat<75?C.amber:C.accent },
-        { label:'MÉCONTENTEMENT FORMEL', value:`${results.cmpRatio.toFixed(1)}%`, sub:`${fmt(normalized.complaints)} clients sur ${fmt(normalized.clients)} par mois`, color:results.cmpRatio>2?C.coral:C.accent },
-      ];
-      const satW = (CW - 6)/3;
-      satCards.forEach((card, i) => {
-        drawStatCard(M + i*(satW+3), y, satW, 28, card);
-      });
-      y += 32;
-
-      // CA exposé alert
-      const alertH = 22;
-      setDraw(C.rule); setFill(C.cream); pdf.setLineWidth(0.2);
-      pdf.roundedRect(M, y, CW, alertH, 1.5, 1.5, 'FD');
-      setFill(C.coral); pdf.rect(M, y, 1.3, alertH, 'F');
-      setF(12,'bold'); setColor(C.ink);
-      pdf.text(`${fmt(results.revAtRisk)}€ de chiffre d'affaires exposé`, M+6, y+7);
-      setF(8); setColor(C.inkSoft);
-      const exposedText = `Environ ${results.atRisk} clients (${results.churn.toFixed(1)}% de votre base) sont en zone de churn. À LTV estimée de ${fmt(normalized.ltv)}€, c'est votre risque de revenus récurrents sur 12 mois.`;
-      pdf.text(pdf.splitTextToSize(exposedText, CW-12), M+6, y+12);
-      y += alertH + 8;
-
-      // Diagnostic
-      y = drawRule(y, '05', 'Diagnostic');
-      const colW = (CW - 6)/2;
-      let leftY = y, rightY = y;
-
-      setF(11,'bold'); setColor(C.accent);
-      pdf.text('Forces', M, leftY);
-      setF(11,'bold'); setColor(C.coral);
-      pdf.text('Faiblesses', M+colW+6, rightY);
-      leftY += 5; rightY += 5;
-
-      diag.str.forEach(s => {
-        if (leftY > CONTENT_BOTTOM - 14) return;
-        setDraw(C.rule); pdf.setLineWidth(0.15);
-        pdf.line(M, leftY, M+colW, leftY);
-        setF(9,'bold'); setColor(C.ink);
-        pdf.text(s.t, M, leftY+5);
-        setF(7); setColor(C.muted);
-        const sLines = pdf.splitTextToSize(s.d, colW);
-        pdf.text(sLines, M, leftY+9);
-        leftY += 11 + sLines.length*3;
-      });
-
-      diag.wk.forEach(w => {
-        if (rightY > CONTENT_BOTTOM - 14) return;
-        setDraw(C.rule); pdf.setLineWidth(0.15);
-        pdf.line(M+colW+6, rightY, M+colW+6+colW, rightY);
-        // Badge
-        const badgeColor = w.s==='high'?C.coral:C.amber;
-        setFill(badgeColor);
-        pdf.roundedRect(M+colW+6, rightY+1.5, 13, 4, 1, 1, 'F');
-        setF(5.5,'bold'); setColor(C.cream);
-        pdf.text(w.s==='high'?'CRITIQUE':'MODÉRÉ', M+colW+6+6.5, rightY+4.3, {align:'center'});
-        setF(9,'bold'); setColor(C.ink);
-        pdf.text(w.t, M+colW+6+15, rightY+5);
-        setF(7); setColor(C.muted);
-        const wLines = pdf.splitTextToSize(w.d, colW);
-        pdf.text(wLines, M+colW+6, rightY+9);
-        rightY += 11 + wLines.length*3;
-      });
-      y = Math.max(leftY, rightY) + 6;
-
-      // ═══════════════ Plan d'action ═══════════════
-      y = ensureSpace(y, 30);
-      if (y === M) {} else if (y + 30 > CONTENT_BOTTOM) { newPage(); y = M; }
-      y = drawRule(y, '06', "Plan d'action priorisé");
-
-      diag.rec.forEach((r, i) => {
-        const recH = 22;
-        if (y + recH > CONTENT_BOTTOM) { newPage(); y = M; }
-        setDraw(C.rule); setFill(C.cream); pdf.setLineWidth(0.2);
-        pdf.roundedRect(M, y, CW, recH, 1.5, 1.5, 'FD');
-        const numColor = r.p===1?C.coral:r.p===2?C.amber:C.accent;
-        setF(20,'bold'); setColor(numColor);
-        pdf.text(String(i+1).padStart(2,'0'), M+4, y+14);
-        // Badge
-        setFill(numColor);
-        pdf.roundedRect(M+17, y+3.5, 14, 4, 1, 1, 'F');
-        setF(5.5,'bold'); setColor(C.cream);
-        pdf.text(`PRIORITÉ ${r.p}`, M+17+7, y+6.3, {align:'center'});
-        // Title
-        setF(10,'bold'); setColor(C.ink);
-        pdf.text(r.t, M+17, y+13);
-        // Desc
-        setF(7); setColor(C.muted);
-        pdf.text(pdf.splitTextToSize(r.d, CW-85), M+17, y+17);
-        // Impact
-        const impX = M + CW - 60;
-        setDraw(C.rule); pdf.setLineWidth(0.15);
-        pdf.line(impX-2, y+3, impX-2, y+recH-3);
-        setF(5.5,'bold'); setColor(C.muted);
-        pdf.text('IMPACT ESTIMÉ', impX, y+7);
-        setF(8,'bold'); setColor(C.accent);
-        pdf.text(pdf.splitTextToSize(r.i, 55), impX, y+12);
-        y += recH + 2;
-      });
-      y += 6;
-
-      // ═══════════════ Externalisation ═══════════════
-      if (y + 60 > CONTENT_BOTTOM) { newPage(); y = M; }
-      y = drawRule(y, '07', "Simulation d'externalisation");
-      const extH = 58;
-      setFill(C.navy);
-      pdf.roundedRect(M, y, CW, extH, 2, 2, 'F');
-      let ey = y + 8;
-      setF(7,'bold'); setColor(C.cyan);
-      pdf.text('ET SI VOTRE SUPPORT ÉTAIT EXTERNALISÉ ?', M+7, ey);
-      ey += 7;
-      setF(14,'bold'); setColor(C.cream);
-      pdf.text("Le potentiel d'un partenaire spécialisé,", M+7, ey);
-      ey += 6;
-      setF(14,'bolditalic'); setColor(C.cyan);
-      pdf.text('chiffré sur vos données.', M+7, ey);
-      ey += 12;
-
-      const extItems = [
-        { l:'ÉCONOMIES ANNUELLES', v:`${Math.round(results.savings/1000)}k€`, d:'Direct + coûts cachés' },
-        { l:'TEMPS RÉCUPÉRÉ', v:`${Math.round(results.recov)}h/m`, d:'Pour le cœur de métier' },
-        { l:'ROI ESTIMÉ', v:`${results.roi}%`, d:'Sur 12 mois' },
-        { l:'NPS PROJETÉ', v:`+14 pts`, d:`De ${normalized.nps} vers ${results.newNps}` },
-      ];
-      const extW = (CW - 14)/4;
-      extItems.forEach((it, i) => {
-        const ex = M + 7 + i*extW;
-        setF(6,'bold'); setColor(C.cyan);
-        pdf.text(it.l, ex, ey);
-        setF(15,'bold'); setColor(C.cream);
-        pdf.text(it.v, ex, ey+8);
-        setF(6); setColor(C.cyan);
-        pdf.text(it.d, ex, ey+12);
-        if (i < 3) {
-          setDraw([60,80,105]); pdf.setLineWidth(0.15);
-          pdf.line(ex+extW-2, ey-3, ex+extW-2, ey+14);
-        }
-      });
-      y += extH + 8;
-
-      // ═══════════════ Rapport de direction ═══════════════
-      y = ensureSpace(y, 80);
-      if (y + 80 > CONTENT_BOTTOM) { newPage(); y = M; }
-      y = drawRule(y, '08', 'Rapport de direction');
-      setF(6,'bold'); setColor(C.muted);
-      pdf.text('NOTE CONFIDENTIELLE · DIRECTION GÉNÉRALE', M, y);
-      y += 5;
-      setF(14,'bold'); setColor(C.ink);
-      pdf.text(`Synthèse stratégique — ${lead.company || 'Votre organisation'}`, M, y);
-      y += 8;
-
-      const execS = [
-        {t:'SITUATION ACTUELLE', d:`L'évaluation positionne votre support dans la catégorie « ${results.cat} » avec un score de ${results.scores.global}/100. La structure traite entre ${fmt(normalized.ticketsMin)} et ${fmt(normalized.ticketsMax)} demandes mensuelles pour un coût direct estimé à ${fmt(results.direct)}€, soit ${fmt(results.cpt)}€ par ticket (benchmark sectoriel : 15-25€).`},
-        {t:'RISQUES IDENTIFIÉS', d:`(1) Les coûts cachés représentent ${fmt(results.totalH)}€/mois — ${Math.round(results.totalH/results.totalR*100)}% du coût total réel. (2) Le risque de churn expose ${fmt(results.revAtRisk)}€ de CA sur 12 mois. (3) ${diag.wk.filter(w=>w.s==='high').length} faiblesse(s) critique(s) requièrent une action immédiate.`},
-        {t:'OPPORTUNITÉS', d:`Potentiel de ${fmt(results.savings)}€/an mobilisable sur 6-12 mois : automatisation (${Math.round(normalized.repetitiveHours*0.6)}h/mois), refonte L1/L2, récupération de ${Math.round(results.recov)}h/mois pour les équipes tech & commerciales.`},
-        {t:'RECOMMANDATION STRATÉGIQUE', d:results.scores.global<50?"Le niveau actuel justifie une action structurante immédiate. Nous recommandons d'évaluer en priorité un partenariat d'externalisation spécialisé hospitality. Le ROI est inférieur à 12 mois.":results.scores.global<75?"Des marges d'optimisation significatives n'imposent pas de rupture organisationnelle. Plan en deux temps : optimisation interne 6 mois, puis benchmark externalisation pour arbitrer.":"La maturité opérationnelle est élevée. Investissement ciblé sur les outils prédictifs et la formation pour transformer le support en avantage concurrentiel durable."},
-      ];
-      execS.forEach(s => {
-        y = ensureSpace(y, 18);
-        setF(7,'bold'); setColor(C.accent);
-        pdf.text(s.t, M, y);
-        y += 4;
-        setF(9); setColor(C.inkSoft);
-        const lines = pdf.splitTextToSize(s.d, CW);
-        pdf.text(lines, M, y);
-        y += lines.length*4 + 5;
-      });
-
-      // ═══════════════ CTA Calendly final ═══════════════
-      y = ensureSpace(y, 70);
-      if (y + 70 > CONTENT_BOTTOM) { newPage(); y = M; }
-      const ctaH = 64;
-      setFill(C.navy);
-      pdf.roundedRect(M, y, CW, ctaH, 2, 2, 'F');
-      let cy = y + 9;
-      setF(6,'bold'); setColor(C.cyan);
-      pdf.text('PROCHAINE ÉTAPE', W/2, cy, {align:'center'});
-      cy += 7;
-      setF(19,'bold'); setColor(C.cream);
-      pdf.text('Échangeons sur votre', W/2, cy, {align:'center'});
-      cy += 7;
-      setF(19,'bolditalic'); setColor(C.cyan);
-      pdf.text('plan de transformation', W/2, cy, {align:'center'});
-      cy += 8;
-      setF(9); setColor(C.cream);
-      const ctaT = `Réservez 30 minutes avec un consultant Izzy All pour challenger ces conclusions et construire un plan d'action pour ${lead.company || 'votre organisation'}.`;
-      const ctaL = pdf.splitTextToSize(ctaT, CW-30);
-      ctaL.forEach((line, i) => pdf.text(line, W/2, cy + i*4, {align:'center'}));
-      cy += ctaL.length*4 + 6;
-
-      // Bouton cliquable
-      const btnW = 78, btnH = 11;
-      const btnX = W/2 - btnW/2;
-      setFill(C.cyan);
-      pdf.roundedRect(btnX, cy, btnW, btnH, btnH/2, btnH/2, 'F');
-      setF(9,'bold'); setColor(C.ink);
-      pdf.text('RÉSERVER MON CRÉNEAU (30 MIN)', W/2, cy+7, {align:'center'});
-      pdf.link(btnX, cy, btnW, btnH, {url:'https://calendly.com/commercial-izzysales/30min'});
-      cy += btnH + 5;
-      setF(8); setColor(C.cyan);
-      const urlText = 'calendly.com/commercial-izzysales/30min';
-      const urlW = pdf.getTextWidth(urlText);
-      pdf.textWithLink(urlText, W/2 - urlW/2, cy, {url:'https://calendly.com/commercial-izzysales/30min'});
-
-      // Footer de la dernière page
-      drawFooter();
-
-      // Sauvegarder
+      // 4) Sauvegarder
       const safeName = (lead.company || 'Rapport').replace(/[^a-zA-Z0-9-_]/g, '_');
       pdf.save(`Audit-Izzy-All-${safeName}.pdf`);
     }
@@ -1685,17 +1328,15 @@
         } catch(e) {}
       }, [stage, step]);
 
-      // ── GÉNÉRATION PDF VIA jsPDF (programmatique, fiable, liens cliquables) ──
+      // ── GÉNÉRATION PDF PAR CAPTURE DOM (fidélité visuelle 100% à l'écran) ──
       const doPrint = useCallback(async () => {
         if (isGenerating) return;
         setIsGenerating(true);
         try {
-          // Attendre que les graphiques recharts soient bien rendus
-          await new Promise(r => setTimeout(r, 600));
+          // Attendre que tout soit bien rendu (recharts SVG, animations score, etc.)
+          await new Promise(r => setTimeout(r, 500));
           await generatePDF({
-            data, lead,
-            results: res,
-            diag,
+            lead,
             logoBase64: IZZY_LOGO,
           });
         } catch (err) {
@@ -1704,7 +1345,7 @@
         } finally {
           setIsGenerating(false);
         }
-      }, [data, lead, isGenerating]);
+      }, [lead, isGenerating]);
 
       const res = useMemo(() => compute(data), [data]);
       const diag = useMemo(() => generateDiag(data, res), [data, res]);
@@ -1824,7 +1465,7 @@
       ];
 
       return <W stage={stage} step={step} totalSteps={STEPS.length}>
-        <section style={{paddingTop:56}}>
+        <section id="pdf-source" style={{paddingTop:56}}>
           <div className="hero-grid keep-together" style={{display:'grid', gridTemplateColumns:'1.4fr 1fr', gap:56, alignItems:'start', marginBottom:60}}>
             <div>
               <div style={{fontFamily:F.s, fontSize:11, fontWeight:700, color:c.accent, letterSpacing:'0.2em', textTransform:'uppercase', marginBottom:14}}>
