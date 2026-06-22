@@ -1308,9 +1308,58 @@
       const [data, setData] = useState(DEF);
       const [lead, setLead] = useState({name:'', company:'', email:'', phone:''});
       const [isGenerating, setIsGenerating] = useState(false);
+      const [isSubmitting, setIsSubmitting] = useState(false);
 
       const upd = useCallback(k => v => setData(d => ({...d, [k]:v})), []);
       const updLead = useCallback(k => v => setLead(l => ({...l, [k]:v})), []);
+
+      // Envoi des données au webhook Make → Pipedrive + email de notification
+      const handleSubmitLead = useCallback(async () => {
+        if (isSubmitting) return;
+        setIsSubmitting(true);
+        const currentRes = compute(data);
+        const payload = {
+          // Coordonnées du prospect
+          name: lead.name,
+          company: lead.company,
+          email: lead.email,
+          phone: lead.phone || '',
+          // Résultats de l'audit
+          score: currentRes.scores.global,
+          category: currentRes.cat,
+          hidden_costs_monthly: Math.round(currentRes.totalH),
+          annual_savings: Math.round(currentRes.savings),
+          churn_risk_pct: parseFloat(currentRes.churn.toFixed(1)),
+          revenue_at_risk: Math.round(currentRes.revAtRisk),
+          total_real_cost_monthly: Math.round(currentRes.totalR),
+          // Métriques clés
+          tickets_min: data.ticketsMin || 500,
+          tickets_max: data.ticketsMax || 1500,
+          clients: data.clients || 1000,
+          agents: data.agents || 3,
+          frt_hours: data.frt || 8,
+          nps: data.nps ?? 15,
+          csat: data.csat ?? 70,
+          // Méta
+          audit_date: new Date().toLocaleDateString('fr-FR'),
+          audit_url: window.location.href,
+          source: 'Audit Maturité Support — Izzy All',
+        };
+        try {
+          await fetch('https://hook.eu1.make.com/pc37r8hyr1yqj44f84dikmuarvsg6nf4', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(payload),
+            mode: 'no-cors', // nécessaire depuis une iframe cross-origin
+          });
+        } catch(e) {
+          // Ne pas bloquer l'utilisateur si le webhook échoue
+          console.warn('Webhook Make:', e);
+        } finally {
+          setIsSubmitting(false);
+          setStage('results');
+        }
+      }, [lead, data, isSubmitting]);
 
       // Auto-scroll au changement d'étape ou de stage — fluide même quand embarqué dans Wix
       const isFirstRender = useRef(true);
@@ -1442,7 +1491,9 @@
           </div>
           <div style={{display:'flex', justifyContent:'space-between', marginTop:32}}>
             <Btn secondary onClick={()=>setStage('form')}><ChevronLeft size={16}/> Modifier</Btn>
-            <Btn disabled={!ok} onClick={()=>setStage('results')}>Accéder au rapport <ArrowRight size={16}/></Btn>
+            <Btn disabled={!ok || isSubmitting} onClick={handleSubmitLead}>
+              {isSubmitting ? 'Envoi en cours…' : 'Accéder au rapport'} {!isSubmitting && <ArrowRight size={16}/>}
+            </Btn>
           </div>
         </section>
       </W>;
